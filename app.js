@@ -608,22 +608,29 @@
 
   function setCardImg(el, src, alt, fallbackText) {
     if (!el) return;
-    el.innerHTML = '';
-    const img = document.createElement('img');
-    img.className = 'card-img';
-    img.alt = alt || '';
-    img.draggable = false;
-    img.src = src;
-    img.addEventListener('error', () => {
-      // Try BACK.svg if BACK-RED.svg is missing.
-      if (src.endsWith('/BACK-RED.svg')) {
-        img.src = `${CARD_ASSET_BASE}/BACK.svg`;
-        return;
+
+    let img = el.querySelector(':scope > img.card-img');
+    if (!img) {
+      el.textContent = '';
+      img = document.createElement('img');
+      img.className = 'card-img';
+      img.draggable = false;
+      el.appendChild(img);
+    } else {
+      for (const node of Array.from(el.childNodes)) {
+        if (node !== img) node.remove();
       }
-      el.innerHTML = '';
-      el.textContent = fallbackText || '�';
-    });
-    el.appendChild(img);
+    }
+
+    img.alt = alt || '';
+    if (img.getAttribute('src') !== src) img.setAttribute('src', src);
+    img.onerror = () => {
+      if (src.endsWith('/BACK-RED.svg')) {
+        img.setAttribute('src', `${CARD_ASSET_BASE}/BACK.svg`);
+      } else {
+        el.textContent = fallbackText || alt || '??';
+      }
+    };
   }
 
   function renderCardFace(el, card) {
@@ -643,7 +650,7 @@
     if (!el) return;
     el.classList.remove('red');
     const src = `${CARD_ASSET_BASE}/${backAssetFilename()}`;
-    setCardImg(el, src, 'Card back', '🂠');
+    setCardImg(el, src, 'Card Back', '🂠');
   }
 
   function rankLabel(rank) {
@@ -836,7 +843,11 @@
           const c = STATE.deck.pop();
           if (!c) break;
           p.hand.push(c);
-          render();
+          if (pi === 0) {
+            updateHandDom(UI.humanHand, p.hand, true);
+          } else {
+            updateCpuHandDom(getHandElByPlayerIndex(pi), p.hand.length);
+          }
           await animateFlyCard(UI.drawPileCard, getHandElByPlayerIndex(pi), '', true, dealAnimMs);
           await sleep(CONFIG.initialDealCardDelayMs);
         }
@@ -877,6 +888,7 @@
     STATE.phase = 'mustDraw';
     STATE.busy = false;
     STATE.dealing = false;
+    updateHandDom(UI.humanHand, STATE.players[0].hand, false);
     render();
 
     if (STATE.currentPlayer !== 0) maybeRunCpuTurn();
@@ -1025,293 +1037,83 @@
     }
   }
 
-  function render() {
-    const td = topDiscard();
-    UI.drawPileCount.textContent = String(STATE.deck.length);
-    UI.discardPileCount.textContent = String(STATE.discard.length);
-    UI.discardPileCard.className = 'card' + (td && isRedSuit(td.suit) ? ' red' : '');
-    if (td) renderCardFace(UI.discardPileCard, td);
-    else {
-      UI.discardPileCard.innerHTML = '';
-      UI.discardPileCard.textContent = '—';
+  function ensureHumanCardWired(el) {
+    if (!el || el._wiredHumanCard) return;
+    el.addEventListener('pointerdown', beginHumanHandReorder);
+    el._wiredHumanCard = true;
+  }
+
+  function updateHandDom(container, cards, faceDown) {
+    if (!container) return;
+    const existing = new Map();
+    for (const child of Array.from(container.children)) {
+      if (!(child instanceof HTMLElement)) continue;
+      const uid = child.dataset.uid;
+      if (uid) existing.set(uid, child);
     }
 
-    renderCardBack(UI.drawPileCard);
-
-    const canHumanInteract = !STATE.handOver && !STATE.busy && STATE.currentPlayer === 0 && !!STATE.players[0]?.playing;
-    UI.drawPile.classList.toggle('dbl', canHumanInteract && STATE.phase === 'mustDraw');
-    UI.discardPile.classList.toggle('dbl', canHumanInteract && STATE.phase === 'mustDraw' && !!td);
-
-    UI.turnIndicator.textContent = `Turn: ${currentPlayer().name}`;
-
-    renderScoreboard();
-
-    for (let i = 0; i < STATE.players.length; i++) {
-      const seat = seatElByPlayerIndex(i);
-      if (!seat) continue;
-      seat.classList.toggle('isDealer', i === STATE.dealerIndex);
-      seat.classList.toggle('isTurn', i === STATE.currentPlayer && !STATE.handOver);
-      seat.classList.toggle('isWinner', Number.isInteger(STATE.winnerIndex) && i === STATE.winnerIndex);
-    }
-
-    const human = STATE.players[0];
-    if (!human.playing) {
-      UI.humanMeta.textContent = 'Sitting Out';
-    } else {
-      UI.humanMeta.textContent = gameOptions.noKnock
-        ? `Cards: ${human.hand.length} | Deadwood (best): ${playerDeadwoodEstimate(human)}`
-        : `Cards: ${human.hand.length} | Deadwood (best): ${playerDeadwoodEstimate(human)} | Knock ≤ ${CONFIG.knockThreshold}`;
-    }
-
-    const cpu1 = STATE.players[1];
-    const cpu2 = STATE.players[2];
-    const cpu3 = STATE.players[3];
-    const cpu4 = STATE.players[4];
-
-    UI.cpu1Meta.textContent = cpu1.playing ? `Cards: ${cpu1.hand.length}` : 'Sitting Out';
-    UI.cpu2Meta.textContent = cpu2.playing ? `Cards: ${cpu2.hand.length}` : 'Sitting Out';
-    UI.cpu3Meta.textContent = cpu3.playing ? `Cards: ${cpu3.hand.length}` : 'Sitting Out';
-    UI.cpu4Meta.textContent = cpu4.playing ? `Cards: ${cpu4.hand.length}` : 'Sitting Out';
-
-    renderCpuHand(UI.cpu1Hand, cpu1.playing ? cpu1.hand.length : 0);
-    renderCpuHand(UI.cpu2Hand, cpu2.playing ? cpu2.hand.length : 0);
-    renderCpuHand(UI.cpu3Hand, cpu3.playing ? cpu3.hand.length : 0);
-    renderCpuHand(UI.cpu4Hand, cpu4.playing ? cpu4.hand.length : 0);
-
-    UI.humanHand.innerHTML = '';
-    if (human.playing) {
-      for (let i = 0; i < human.hand.length; i++) {
-        const c = human.hand[i];
-        const el = document.createElement('div');
-        el.className = 'handCard' + (isRedSuit(c.suit) ? ' red' : '');
-        if (STATE.selected.has(c.id)) el.className += ' selected';
-        if (STATE.justDrewCardId === c.id) el.className += STATE.justDrewHold ? ' just-drew-hold' : ' just-drew';
-        renderCardFace(el, c);
-        el.dataset.cardId = c.id;
+    for (const c of cards) {
+      let el = existing.get(c.id);
+      if (!el) {
+        el = document.createElement('div');
         el.dataset.uid = c.id;
-        el.dataset.index = String(i);
-        el.addEventListener('pointerdown', beginHumanHandReorder);
-        UI.humanHand.appendChild(el);
+        el.dataset.cardId = c.id;
+      } else {
+        existing.delete(c.id);
       }
+
+      el.className = 'handCard' + (isRedSuit(c.suit) ? ' red' : '');
+      if (STATE.selected.has(c.id)) el.className += ' selected';
+      if (STATE.justDrewCardId === c.id) el.className += STATE.justDrewHold ? ' just-drew-hold' : ' just-drew';
+
+      ensureHumanCardWired(el);
+
+      if (faceDown) renderCardBack(el);
+      else renderCardFace(el, c);
+
+      container.appendChild(el);
     }
 
-    renderMelds(UI.humanMelds, human.playing ? human.melds : []);
-    renderMelds(UI.cpu1Melds, cpu1.playing ? (cpu1.melds || []) : []);
-    renderMelds(UI.cpu2Melds, cpu2.playing ? (cpu2.melds || []) : []);
-    renderMelds(UI.cpu3Melds, cpu3.playing ? (cpu3.melds || []) : []);
-    renderMelds(UI.cpu4Melds, cpu4.playing ? (cpu4.melds || []) : []);
-
-    updateButtons();
+    for (const leftover of existing.values()) leftover.remove();
   }
 
-  function updateButtons() {
-    const p = currentPlayer();
-    const isHumanTurn = p.isHuman && STATE.currentPlayer === 0;
-    const canAct = !STATE.handOver;
+  function updateCpuHandDom(container, count) {
+    if (!container) return;
+    const maxShown = 14;
+    const show = Math.min(count, maxShown);
+    const children = Array.from(container.children);
 
-    const humanPlaying = !!STATE.players[0]?.playing;
-
-    const enabled = canAct && isHumanTurn && !STATE.busy && humanPlaying;
-
-    // Sort is allowed any time during a hand; it only reorders Billy's hand.
-    if (UI.btnSort) UI.btnSort.disabled = STATE.handOver || STATE.busy || !humanPlaying;
-
-    const enoughPlayers = participatingCount() >= 2;
-    UI.btnNewHand.disabled = !STATE.handOver || STATE.busy || STATE.dealing || !enoughPlayers;
-    UI.btnCreateMeld.disabled = !(enabled && STATE.phase === 'mustDiscard' && selectedCount() >= 1);
-    // Clear Selection button removed from UI; selection is cleared by game actions.
-
-    if (UI.optNoKnock) {
-      const lockNoKnock = !STATE.handOver || STATE.dealing;
-      UI.optNoKnock.disabled = lockNoKnock;
-      const label = UI.optNoKnock.closest('label');
-      if (label) label.classList.toggle('isDisabled', lockNoKnock);
+    for (let i = 0; i < show; i++) {
+      let el = children[i];
+      if (!(el instanceof HTMLElement) || !el.classList.contains('cpuCardBack')) {
+        el = document.createElement('div');
+        el.className = 'cpuCardBack';
+      }
+      renderCardBack(el);
+      container.appendChild(el);
     }
 
-    const playChecks = [UI.optPlay0, UI.optPlay1, UI.optPlay2, UI.optPlay3, UI.optPlay4];
-    for (const el of playChecks) {
-      if (!el) continue;
-      const lock = !STATE.handOver || STATE.dealing;
-      el.disabled = lock;
-      const label = el.closest('label');
-      if (label) label.classList.toggle('isDisabled', lock);
+    for (let i = children.length - 1; i >= show; i--) {
+      const n = children[i];
+      if (n) n.remove();
     }
 
-    if (gameOptions.noKnock) {
-      UI.btnKnock.style.display = 'none';
-      UI.btnKnock.disabled = true;
+    if (count > maxShown) {
+      let more = container.querySelector(':scope > .moreCount');
+      if (!more) {
+        more = document.createElement('div');
+        more.className = 'moreCount';
+      }
+      more.textContent = `+${count - maxShown}`;
+      container.appendChild(more);
     } else {
-      UI.btnKnock.style.display = '';
-      const dropAllowed = enabled && STATE.phase === 'mustDraw';
-      UI.btnKnock.disabled = !dropAllowed;
+      const more = container.querySelector(':scope > .moreCount');
+      if (more) more.remove();
     }
-
-    let msg = '';
-    if (STATE.handOver) {
-      msg = enoughPlayers ? 'Hand over. Click “New Hand” to deal again.' : 'Select at least 2 players.';
-    } else if (!isHumanTurn) {
-      msg = `${p.name} is thinking...`;
-    } else if (STATE.busy) {
-      msg = 'Resolving action...';
-    } else if (STATE.phase === 'mustDraw') {
-      msg = 'Your turn: double-click Draw or Discard.';
-    } else if (STATE.phase === 'mustDiscard') {
-      msg = 'Double-click a card to discard (you can also create spreads/hits).';
-    }
-    setStatus(msg);
-  }
-
-  function checkEmptyHandWin(pIdx, viaDiscard) {
-    const p = STATE.players[pIdx];
-    if (!p) return false;
-    if (p.hand.length !== 0) return false;
-    if (viaDiscard) {
-      logLine(`${p.name} wins (empty hand).`);
-      settleWinner(pIdx, 1, 'empty hand');
-      endHand({ kind: 'empty', by: pIdx, double: false });
-    } else {
-      logLine(`${p.name} wins by TONK OUT (no final discard) — double stake.`);
-      settleWinner(pIdx, 2, 'tonk out');
-      endHand({ kind: 'empty', by: pIdx, double: true });
-    }
-    return true;
-  }
-
-  function settleWinner(winnerIdx, multiplier, why) {
-    const stake = (gameOptions.basicStake || 1) * multiplier;
-    for (let i = 0; i < STATE.players.length; i++) {
-      if (i === winnerIdx) continue;
-      if (!STATE.players[i].playing) continue;
-      applyPayment(i, winnerIdx, stake, why);
-    }
-  }
-
-  function settleStockOut() {
-    const totals = STATE.players.map((p) => (p && p.playing ? handPoints(p.hand) : Infinity));
-    const min = Math.min(...totals);
-    const lows = [];
-    for (let i = 0; i < totals.length; i++) if (totals[i] === min) lows.push(i);
-    STATE.winnerIndex = lows.length === 1 ? lows[0] : null;
-    logLine(`Stock out. Lowest hand total: ${min}.`);
-    const stake = gameOptions.basicStake || 1;
-    for (const low of lows) {
-      for (let i = 0; i < STATE.players.length; i++) {
-        if (i === low) continue;
-        if (lows.includes(i)) continue;
-        if (!STATE.players[i].playing) continue;
-        applyPayment(i, low, stake, 'stock out');
-      }
-    }
-  }
-
-  function settleDrop(dropperIdx) {
-    const totals = STATE.players.map((p) => (p && p.playing ? handPoints(p.hand) : Infinity));
-    const min = Math.min(...totals);
-    const lows = [];
-    for (let i = 0; i < totals.length; i++) if (totals[i] === min) lows.push(i);
-
-    const stake = gameOptions.basicStake || 1;
-    const dropperTotal = totals[dropperIdx];
-    logLine(`${STATE.players[dropperIdx].name} drops with ${dropperTotal}.`);
-
-    const dropperIsLowest = dropperTotal === min && lows.length === 1 && lows[0] === dropperIdx;
-    if (dropperIsLowest) {
-      STATE.winnerIndex = dropperIdx;
-      settleWinner(dropperIdx, 1, 'drop');
-      return;
-    }
-
-    STATE.winnerIndex = lows.length === 1 ? lows[0] : null;
-
-    for (let i = 0; i < totals.length; i++) {
-      if (i === dropperIdx) continue;
-      if (totals[i] <= dropperTotal) {
-        if (!STATE.players[i].playing) continue;
-        applyPayment(dropperIdx, i, 2 * stake, 'catch');
-      }
-    }
-
-    for (const low of lows) {
-      for (let i = 0; i < totals.length; i++) {
-        if (i === low) continue;
-        if (lows.includes(i)) continue;
-        if (!STATE.players[i].playing) continue;
-        applyPayment(i, low, stake, 'lowest');
-      }
-    }
-  }
-
-  function canHitMeld(meld, card) {
-    if (!meld || !card) return false;
-    if (meld.type === 'set' || meld.type === 'book') {
-      if (meld.cards.length >= 4) return false;
-      return meld.cards.length >= 3 && meld.cards[0].rank === card.rank;
-    }
-    if (meld.type === 'run') {
-      const suit = meld.cards[0]?.suit;
-      if (suit !== card.suit) return false;
-
-      const aceHigh = !!meld.aceHigh;
-      const mapped = meld.cards.map((c) => (aceHigh && c.rank === 1 ? 14 : c.rank));
-      const min = Math.min(...mapped);
-      const max = Math.max(...mapped);
-      const cand = aceHigh && card.rank === 1 ? 14 : card.rank;
-
-      // Special case: allow Ace to extend a run ending in K (e.g. Q-K + A => Q-K-A)
-      if (!aceHigh && card.rank === 1 && max === 13) return true;
-
-      if (cand === min - 1) {
-        if (aceHigh) return cand >= 2;
-        return cand >= 1;
-      }
-      if (cand === max + 1) {
-        if (aceHigh) return cand <= 14;
-        return cand <= 13;
-      }
-      return false;
-    }
-    return false;
-  }
-
-  function applyHitToFirstLegalMeld(card) {
-    for (let pi = 0; pi < STATE.players.length; pi++) {
-      const p = STATE.players[pi];
-      for (const meld of p.melds) {
-        if (canHitMeld(meld, card)) {
-          if (meld.type === 'run' && !meld.aceHigh && card.rank === 1) {
-            const ranks = meld.cards.map((c) => c.rank);
-            const max = Math.max(...ranks);
-            if (max === 13) meld.aceHigh = true;
-          }
-          meld.cards.push(card);
-          if (meld.type === 'run') sortRunMeldCards(meld);
-          else meld.cards = sortedByRankThenSuit(meld.cards);
-          return { ok: true, playerIdx: pi, meld };
-        }
-      }
-    }
-    return { ok: false };
   }
 
   function renderCpuHand(container, count) {
-    if (!container) return;
-    container.innerHTML = '';
-    const maxShown = 14;
-    const show = Math.min(count, maxShown);
-    for (let i = 0; i < show; i++) {
-      const back = document.createElement('div');
-      back.className = 'cpuCardBack';
-      renderCardBack(back);
-      container.appendChild(back);
-    }
-    if (count > maxShown) {
-      const more = document.createElement('div');
-      more.style.fontSize = '12px';
-      more.style.color = 'rgba(244,244,244,0.75)';
-      more.style.alignSelf = 'center';
-      more.textContent = `+${count - maxShown}`;
-      container.appendChild(more);
-    }
+    updateCpuHandDom(container, count);
   }
 
   function toggleSelected(cardId) {

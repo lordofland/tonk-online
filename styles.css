@@ -257,6 +257,51 @@ body {
   background: rgba(240, 199, 94, 0.06);
 }
 
+.seat.isWinner::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  padding: 2px;
+  pointer-events: none;
+  opacity: 0.85;
+  background:
+    radial-gradient(6px 6px at 12% 18%, rgba(255, 255, 255, 0.95), rgba(255, 255, 255, 0) 60%),
+    radial-gradient(5px 5px at 24% 86%, rgba(240, 199, 94, 0.95), rgba(240, 199, 94, 0) 60%),
+    radial-gradient(4px 4px at 48% 10%, rgba(255, 255, 255, 0.85), rgba(255, 255, 255, 0) 60%),
+    radial-gradient(6px 6px at 62% 92%, rgba(240, 199, 94, 0.9), rgba(240, 199, 94, 0) 60%),
+    radial-gradient(4px 4px at 78% 14%, rgba(255, 255, 255, 0.85), rgba(255, 255, 255, 0) 60%),
+    radial-gradient(5px 5px at 90% 62%, rgba(240, 199, 94, 0.95), rgba(240, 199, 94, 0) 60%),
+    radial-gradient(4px 4px at 8% 58%, rgba(255, 255, 255, 0.8), rgba(255, 255, 255, 0) 60%);
+  background-repeat: no-repeat;
+  filter: drop-shadow(0 0 6px rgba(240, 199, 94, 0.35));
+
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+  mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  mask-composite: exclude;
+
+  animation: winnerSparkleTwinkle 1.35s ease-in-out infinite;
+}
+
+@keyframes winnerSparkleTwinkle {
+  0% {
+    opacity: 0.45;
+    filter: drop-shadow(0 0 5px rgba(240, 199, 94, 0.25));
+    transform: translate3d(0, 0, 0);
+  }
+  40% {
+    opacity: 0.9;
+    filter: drop-shadow(0 0 8px rgba(240, 199, 94, 0.4));
+    transform: translate3d(0.5px, -0.5px, 0);
+  }
+  100% {
+    opacity: 0.55;
+    filter: drop-shadow(0 0 6px rgba(240, 199, 94, 0.3));
+    transform: translate3d(0, 0, 0);
+  }
+}
+
 .seat {
   position: relative;
 }

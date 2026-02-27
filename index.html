@@ -1,0 +1,113 @@
+
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Tonk (Local)</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <div id="app">
+      <header class="topbar">
+        <div class="title">Tonk (Local)</div>
+        <div class="turn" id="turnIndicator">Turn: —</div>
+      </header>
+
+      <section class="scoreboard" id="scoreboard" aria-label="Scoreboard"></section>
+
+      <main class="table">
+        <section class="player cpu seat" id="cpu2" data-seat="cpu2">
+          <div class="playerHeader">
+            <div class="playerName" id="cpu2Name">Curt <span class="badge" id="badgeDealer2">D</span> <span class="winnerLabel">WINNER</span> <label class="playToggle"><input type="checkbox" id="optPlay2" checked /> Playing</label></div>
+            <div class="playerMeta" id="cpu2Meta">Cards: 0</div>
+          </div>
+          <div class="playerMelds" id="cpu2Melds"></div>
+          <div class="cpuHand" id="cpu2Hand" aria-label="CPU 2 hand"></div>
+        </section>
+
+        <section class="player center seat" id="center" data-seat="center">
+          <div class="piles">
+            <div class="pile" id="drawPile" role="button" tabindex="0" aria-label="Draw pile">
+              <div class="pileLabel">Draw</div>
+              <div class="card back" id="drawPileCard">🂠</div>
+              <div class="pileCount" id="drawPileCount">0</div>
+            </div>
+            <div class="pile" id="discardPile" role="button" tabindex="0" aria-label="Discard pile">
+              <div class="pileLabel">Discard</div>
+              <div class="card" id="discardPileCard">—</div>
+              <div class="pileCount" id="discardPileCount">0</div>
+            </div>
+          </div>
+          <div class="centerControls" id="centerControls">
+            <button id="btnNewHand">New Hand</button>
+            <label class="optionToggle optionToggleSmall">Bet <input type="number" id="optStake" min="1" step="1" value="1" /></label>
+            <label class="optionToggle"><input type="checkbox" id="optNoKnock" /> No Knock</label>
+          </div>
+        </section>
+
+        <section class="player cpu seat" id="cpu3" data-seat="cpu3">
+          <div class="playerHeader">
+            <div class="playerName" id="cpu3Name">Andy <span class="badge" id="badgeDealer3">D</span> <span class="winnerLabel">WINNER</span> <label class="playToggle"><input type="checkbox" id="optPlay3" checked /> Playing</label></div>
+            <div class="playerMeta" id="cpu3Meta">Cards: 0</div>
+          </div>
+          <div class="playerMelds" id="cpu3Melds"></div>
+          <div class="cpuHand" id="cpu3Hand" aria-label="CPU 3 hand"></div>
+        </section>
+
+        <section class="player cpu seat" id="cpu1" data-seat="cpu1">
+          <div class="playerHeader">
+            <div class="playerName" id="cpu1Name">Butch <span class="badge" id="badgeDealer1">D</span> <span class="winnerLabel">WINNER</span> <label class="playToggle"><input type="checkbox" id="optPlay1" checked /> Playing</label></div>
+            <div class="playerMeta" id="cpu1Meta">Cards: 0</div>
+          </div>
+          <div class="playerMelds" id="cpu1Melds"></div>
+          <div class="cpuHand" id="cpu1Hand" aria-label="CPU 1 hand"></div>
+        </section>
+
+        <section class="player human seat" id="human" data-seat="human">
+          <div class="playerHeader">
+            <div class="playerHeaderLeft">
+              <div class="playerName" id="humanName">Billy <span class="badge" id="badgeDealer0">D</span> <span class="winnerLabel">WINNER</span> <label class="playToggle"><input type="checkbox" id="optPlay0" checked /> Playing</label></div>
+              <div class="headerControls" id="humanHeaderControls">
+                <button class="btnSmall" id="btnCreateMeld">Meld</button>
+                <button class="btnSmall" id="btnSort">Sort</button>
+              </div>
+            </div>
+            <div class="playerMeta" id="humanMeta">Cards: 0</div>
+          </div>
+          <div class="humanControls" id="humanControls">
+            <button class="btnSmall" id="btnKnock">Drop</button>
+          </div>
+          <div class="playerMelds" id="humanMelds"></div>
+          <div class="hand" id="humanHand" aria-label="Your hand"></div>
+        </section>
+
+        <section class="player cpu seat" id="cpu4" data-seat="cpu4">
+          <div class="playerHeader">
+            <div class="playerName" id="cpu4Name">Mark <span class="badge" id="badgeDealer4">D</span> <span class="winnerLabel">WINNER</span> <label class="playToggle"><input type="checkbox" id="optPlay4" checked /> Playing</label></div>
+            <div class="playerMeta" id="cpu4Meta">Cards: 0</div>
+          </div>
+          <div class="playerMelds" id="cpu4Melds"></div>
+          <div class="cpuHand" id="cpu4Hand" aria-label="CPU 4 hand"></div>
+        </section>
+
+      </main>
+
+      <section class="bottomPanel" id="bottomPanel">
+        <div class="help" id="helpText">
+          Double-click Draw to draw. Double-click Discard to take. Double-click a card in your hand to discard.
+        </div>
+        <div class="status" id="statusLine">—</div>
+        <div class="logWrap">
+          <div class="logTitle">Log</div>
+          <div class="log" id="log"></div>
+        </div>
+      </section>
+
+      <div id="fxLayer" aria-hidden="true"></div>
+    </div>
+
+    <script src="app.js"></script>
+  </body>
+</html>
+

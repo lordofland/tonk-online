@@ -1037,6 +1037,130 @@
     }
   }
 
+  function render() {
+    const td = topDiscard();
+    UI.drawPileCount.textContent = String(STATE.deck.length);
+    UI.discardPileCount.textContent = String(STATE.discard.length);
+
+    UI.discardPileCard.className = 'card' + (td && isRedSuit(td.suit) ? ' red' : '');
+    if (td) renderCardFace(UI.discardPileCard, td);
+    else {
+      UI.discardPileCard.textContent = '';
+      UI.discardPileCard.textContent = '—';
+    }
+
+    renderCardBack(UI.drawPileCard);
+
+    const canHumanInteract = !STATE.handOver && !STATE.busy && STATE.currentPlayer === 0 && !!STATE.players[0]?.playing;
+    UI.drawPile.classList.toggle('dbl', canHumanInteract && STATE.phase === 'mustDraw');
+    UI.discardPile.classList.toggle('dbl', canHumanInteract && STATE.phase === 'mustDraw' && !!td);
+
+    UI.turnIndicator.textContent = `Turn: ${currentPlayer().name}`;
+
+    renderScoreboard();
+
+    for (let i = 0; i < STATE.players.length; i++) {
+      const seat = seatElByPlayerIndex(i);
+      if (!seat) continue;
+      seat.classList.toggle('isDealer', i === STATE.dealerIndex);
+      seat.classList.toggle('isTurn', i === STATE.currentPlayer && !STATE.handOver);
+      seat.classList.toggle('isWinner', Number.isInteger(STATE.winnerIndex) && i === STATE.winnerIndex);
+    }
+
+    const human = STATE.players[0];
+    if (!human.playing) {
+      UI.humanMeta.textContent = 'Sitting Out';
+    } else {
+      UI.humanMeta.textContent = gameOptions.noKnock
+        ? `Cards: ${human.hand.length} | Deadwood (best): ${playerDeadwoodEstimate(human)}`
+        : `Cards: ${human.hand.length} | Deadwood (best): ${playerDeadwoodEstimate(human)} | Knock ≤ ${CONFIG.knockThreshold}`;
+    }
+
+    const cpu1 = STATE.players[1];
+    const cpu2 = STATE.players[2];
+    const cpu3 = STATE.players[3];
+    const cpu4 = STATE.players[4];
+
+    UI.cpu1Meta.textContent = cpu1.playing ? `Cards: ${cpu1.hand.length}` : 'Sitting Out';
+    UI.cpu2Meta.textContent = cpu2.playing ? `Cards: ${cpu2.hand.length}` : 'Sitting Out';
+    UI.cpu3Meta.textContent = cpu3.playing ? `Cards: ${cpu3.hand.length}` : 'Sitting Out';
+    UI.cpu4Meta.textContent = cpu4.playing ? `Cards: ${cpu4.hand.length}` : 'Sitting Out';
+
+    renderCpuHand(UI.cpu1Hand, cpu1.playing ? cpu1.hand.length : 0);
+    renderCpuHand(UI.cpu2Hand, cpu2.playing ? cpu2.hand.length : 0);
+    renderCpuHand(UI.cpu3Hand, cpu3.playing ? cpu3.hand.length : 0);
+    renderCpuHand(UI.cpu4Hand, cpu4.playing ? cpu4.hand.length : 0);
+
+    if (!human.playing) {
+      updateHandDom(UI.humanHand, [], false);
+    } else {
+      updateHandDom(UI.humanHand, human.hand, !!STATE.dealing);
+    }
+
+    renderMelds(UI.humanMelds, human.playing ? human.melds : []);
+    renderMelds(UI.cpu1Melds, cpu1.playing ? (cpu1.melds || []) : []);
+    renderMelds(UI.cpu2Melds, cpu2.playing ? (cpu2.melds || []) : []);
+    renderMelds(UI.cpu3Melds, cpu3.playing ? (cpu3.melds || []) : []);
+    renderMelds(UI.cpu4Melds, cpu4.playing ? (cpu4.melds || []) : []);
+
+    updateButtons();
+  }
+
+  function updateButtons() {
+    const p = currentPlayer();
+    const isHumanTurn = p.isHuman && STATE.currentPlayer === 0;
+    const canAct = !STATE.handOver;
+
+    const humanPlaying = !!STATE.players[0]?.playing;
+    const enabled = canAct && isHumanTurn && !STATE.busy && humanPlaying;
+
+    if (UI.btnSort) UI.btnSort.disabled = STATE.handOver || STATE.busy || !humanPlaying;
+
+    const enoughPlayers = participatingCount() >= 2;
+    UI.btnNewHand.disabled = !STATE.handOver || STATE.busy || STATE.dealing || !enoughPlayers;
+    UI.btnCreateMeld.disabled = !(enabled && STATE.phase === 'mustDiscard' && selectedCount() >= 1);
+
+    if (gameOptions.noKnock) {
+      UI.btnKnock.style.display = 'none';
+      UI.btnKnock.disabled = true;
+    } else {
+      UI.btnKnock.style.display = '';
+      const dropAllowed = enabled && STATE.phase === 'mustDraw';
+      UI.btnKnock.disabled = !dropAllowed;
+    }
+
+    if (UI.optNoKnock) {
+      const lockNoKnock = !STATE.handOver || STATE.dealing;
+      UI.optNoKnock.disabled = lockNoKnock;
+      const label = UI.optNoKnock.closest('label');
+      if (label) label.classList.toggle('isDisabled', lockNoKnock);
+    }
+
+    const playChecks = [UI.optPlay0, UI.optPlay1, UI.optPlay2, UI.optPlay3, UI.optPlay4];
+    for (const el of playChecks) {
+      if (!el) continue;
+      const lock = !STATE.handOver || STATE.dealing;
+      el.disabled = lock;
+      const label = el.closest('label');
+      if (label) label.classList.toggle('isDisabled', lock);
+    }
+
+    const enough = participatingCount() >= 2;
+    let msg = '';
+    if (STATE.handOver) {
+      msg = enough ? 'Hand over. Click “New Hand” to deal again.' : 'Select at least 2 players.';
+    } else if (!isHumanTurn) {
+      msg = `${p.name} is thinking...`;
+    } else if (STATE.busy) {
+      msg = 'Resolving action...';
+    } else if (STATE.phase === 'mustDraw') {
+      msg = 'Your turn: double-click Draw or Discard.';
+    } else if (STATE.phase === 'mustDiscard') {
+      msg = 'Double-click a card to discard (you can also create spreads/hits).';
+    }
+    setStatus(msg);
+  }
+
   function ensureHumanCardWired(el) {
     if (!el || el._wiredHumanCard) return;
     el.addEventListener('pointerdown', beginHumanHandReorder);

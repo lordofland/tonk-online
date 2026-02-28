@@ -324,6 +324,59 @@
     return { ok: false, type: null };
   }
 
+  function canHitMeld(card, meld) {
+    if (!card || !meld || !Array.isArray(meld.cards) || meld.cards.length < 3) return { ok: false };
+    if (meld.type === 'set') {
+      const rank = meld.cards[0]?.rank;
+      if (rank == null || card.rank !== rank) return { ok: false };
+      const suitTaken = new Set(meld.cards.map((c) => c.suit));
+      if (suitTaken.has(card.suit)) return { ok: false };
+      if (meld.cards.length >= 4) return { ok: false };
+      return { ok: true, aceHigh: false };
+    }
+
+    if (meld.type === 'run') {
+      const suit = meld.cards[0]?.suit;
+      if (!suit || card.suit !== suit) return { ok: false };
+      const nextCards = [...meld.cards.map(cloneCard), cloneCard(card)];
+      const res = isValidRunAceAware(sortedByRankThenSuit(nextCards));
+      if (!res.ok) return { ok: false };
+      return { ok: true, aceHigh: !!res.aceHigh };
+    }
+
+    return { ok: false };
+  }
+
+  function applyHitToFirstLegalMeld(card) {
+    try {
+      if (!card) return { ok: false };
+      for (let pi = 0; pi < STATE.players.length; pi++) {
+        const p = STATE.players[pi];
+        if (!p || !p.playing) continue;
+        const melds = Array.isArray(p.melds) ? p.melds : [];
+        for (let mi = 0; mi < melds.length; mi++) {
+          const meld = melds[mi];
+          const hit = canHitMeld(card, meld);
+          if (!hit.ok) continue;
+
+          meld.cards.push(cloneCard(card));
+          if (meld.type === 'run') {
+            meld.aceHigh = !!hit.aceHigh;
+            sortRunMeldCards(meld);
+          } else {
+            meld.cards = sortedByRankThenSuit(meld.cards.map(cloneCard));
+          }
+
+          return { ok: true, playerIdx: pi, meldIdx: mi };
+        }
+      }
+      return { ok: false };
+    } catch (e) {
+      handleError(e);
+      return { ok: false };
+    }
+  }
+
   const UI = {
     table: document.getElementById('table'),
     turnIndicator: document.getElementById('turnIndicator'),
@@ -1551,118 +1604,133 @@
   }
 
   async function cpuTurn(pIdx) {
-    if (STATE.handOver) return;
-    const p = STATE.players[pIdx];
-    if (!p || p.isHuman) return;
-    if (!p.playing) {
+    try {
+      if (STATE.handOver) return;
+      const p = STATE.players[pIdx];
+      if (!p || p.isHuman) return;
+      if (!p.playing) {
+        STATE.currentPlayer = nextParticipatingIndex(STATE.currentPlayer);
+        STATE.busy = false;
+        render();
+        maybeRunCpuTurn();
+        return;
+      }
+
+      if (STATE.busy) return;
+      STATE.busy = true;
+      render();
+
+      if (STATE.phase !== 'mustDraw') {
+        logLine(`${p.name}: unexpected phase state. Forcing phase to mustDraw.`);
+        STATE.phase = 'mustDraw';
+      }
+
+      if (!gameOptions.noKnock) {
+        const ptsStart = handPoints(p.hand);
+        if (ptsStart <= 7) {
+          logLine(`${p.name} drops.`);
+          STATE.busy = false;
+          render();
+          settleDrop(pIdx);
+          endHand({ kind: 'drop', by: pIdx });
+          return;
+        }
+      }
+
+      const cpuHandEl = getHandElByPlayerIndex(pIdx);
+
+      let source = cpuChooseDrawSource(pIdx);
+      if (gameOptions.noKnock && STATE.deck.length === 0 && source === 'deck') source = 'discard';
+      let drawn = null;
+      if (source === 'discard') {
+        const td = topDiscard();
+        drawn = drawFromDiscard(p);
+        if (!drawn) {
+          drawn = drawFromDeck(p);
+          logLine(`${p.name} tried to take discard but it was empty; drew from deck.`);
+          render();
+          await animateFlyCard(UI.drawPileCard, cpuHandEl, '', true);
+        } else {
+          logLine(`${p.name} took discard ${td ? cardText(td) : ''}.`);
+          render();
+          await animateFlyCard(UI.discardPileCard, cpuHandEl, td ? cardText(td) : '', false);
+        }
+      } else {
+        drawn = drawFromDeck(p);
+        if (!drawn) {
+          const res = stockEmptyHandling(p.name);
+          STATE.busy = false;
+          render();
+          if (res === 'must_take_discard') {
+            const td = topDiscard();
+            const fallback = drawFromDiscard(p);
+            if (fallback) {
+              drawn = fallback;
+              logLine(`${p.name} took discard ${td ? cardText(td) : ''}.`);
+              render();
+              await animateFlyCard(UI.discardPileCard, cpuHandEl, td ? cardText(td) : '', false);
+            }
+          }
+          if (!drawn) return;
+        } else {
+          logLine(`${p.name} drew from deck.`);
+          render();
+          await animateFlyCard(UI.drawPileCard, cpuHandEl, '', true);
+        }
+      }
+
+      cpuPlaySpreadsAndHits(pIdx);
+      render();
+      await sleep(actionDelayMs());
+
+      if (checkEmptyHandWin(pIdx, false)) return;
+
+      STATE.phase = 'mustDiscard';
+      render();
+
+      const discardIdx = cpuChooseDiscardIndex(p);
+      if (discardIdx < 0 || discardIdx >= p.hand.length) {
+        logLine(`${p.name} could not pick a discard. (AI issue)`);
+        STATE.phase = 'mustDraw';
+        STATE.currentPlayer = nextParticipatingIndex(STATE.currentPlayer);
+        STATE.busy = false;
+        render();
+        maybeRunCpuTurn();
+        return;
+      }
+
+      const removed = p.hand.splice(discardIdx, 1)[0];
+      if (removed) {
+        discardCard(p, removed);
+        logLine(`${p.name} discarded ${cardText(removed)}.`);
+        render();
+        await animateFlyCard(cpuHandEl, UI.discardPileCard, cardText(removed), false);
+      }
+
+      if (p.hand.length === 0) {
+        STATE.busy = false;
+        render();
+        checkEmptyHandWin(pIdx, true);
+        return;
+      }
+
+      cpuMaybeMeldReveal(pIdx);
+      render();
+      await sleep(actionDelayMs());
+
+      STATE.phase = 'mustDraw';
       STATE.currentPlayer = nextParticipatingIndex(STATE.currentPlayer);
       STATE.busy = false;
       render();
       maybeRunCpuTurn();
-      return;
-    }
-
-    if (STATE.busy) return;
-    STATE.busy = true;
-    render();
-
-    if (STATE.phase !== 'mustDraw') {
-      logLine(`${p.name}: unexpected phase state. Forcing phase to mustDraw.`);
+    } catch (e) {
+      handleError(e);
       STATE.phase = 'mustDraw';
-    }
-
-    if (!gameOptions.noKnock) {
-      const ptsStart = handPoints(p.hand);
-      if (ptsStart <= 7) {
-        logLine(`${p.name} drops.`);
-        STATE.busy = false;
-        render();
-        settleDrop(pIdx);
-        endHand({ kind: 'drop', by: pIdx });
-        return;
-      }
-    }
-
-    const cpuHandEl = getHandElByPlayerIndex(pIdx);
-
-    let source = cpuChooseDrawSource(pIdx);
-    if (gameOptions.noKnock && STATE.deck.length === 0 && source === 'deck') source = 'discard';
-    let drawn = null;
-    if (source === 'discard') {
-      const td = topDiscard();
-      drawn = drawFromDiscard(p);
-      if (!drawn) {
-        drawn = drawFromDeck(p);
-        logLine(`${p.name} tried to take discard but it was empty; drew from deck.`);
-        render();
-        await animateFlyCard(UI.drawPileCard, cpuHandEl, '', true);
-      } else {
-        logLine(`${p.name} took discard ${td ? cardText(td) : ''}.`);
-        render();
-        await animateFlyCard(UI.discardPileCard, cpuHandEl, td ? cardText(td) : '', false);
-      }
-    } else {
-      drawn = drawFromDeck(p);
-      if (!drawn) {
-        const res = stockEmptyHandling(p.name);
-        STATE.busy = false;
-        render();
-        if (res === 'must_take_discard') {
-          const td = topDiscard();
-          const fallback = drawFromDiscard(p);
-          if (fallback) {
-            drawn = fallback;
-            logLine(`${p.name} took discard ${td ? cardText(td) : ''}.`);
-            render();
-            await animateFlyCard(UI.discardPileCard, cpuHandEl, td ? cardText(td) : '', false);
-          }
-        }
-        if (!drawn) return;
-      } else {
-        logLine(`${p.name} drew from deck.`);
-        render();
-        await animateFlyCard(UI.drawPileCard, cpuHandEl, '', true);
-      }
-    }
-
-    cpuPlaySpreadsAndHits(pIdx);
-    render();
-    await sleep(actionDelayMs());
-
-    if (checkEmptyHandWin(pIdx, false)) return;
-
-    STATE.phase = 'mustDiscard';
-    render();
-
-    const discardIdx = cpuChooseDiscardIndex(p);
-    if (discardIdx < 0 || discardIdx >= p.hand.length) {
-      logLine(`${p.name} could not choose a discard safely. Discarding last card.`);
-    }
-    const idx = discardIdx >= 0 && discardIdx < p.hand.length ? discardIdx : p.hand.length - 1;
-    const removed = p.hand.splice(idx, 1)[0];
-    if (removed) {
-      discardCard(p, removed);
-      logLine(`${p.name} discarded ${cardText(removed)}.`);
-      render();
-      await animateFlyCard(cpuHandEl, UI.discardPileCard, cardText(removed), false);
-    }
-
-    if (p.hand.length === 0) {
+      STATE.currentPlayer = nextParticipatingIndex(STATE.currentPlayer);
       STATE.busy = false;
       render();
-      checkEmptyHandWin(pIdx, true);
-      return;
+      maybeRunCpuTurn();
     }
-
-    cpuMaybeMeldReveal(pIdx);
-    render();
-    await sleep(actionDelayMs());
-
-    STATE.phase = 'mustDraw';
-    STATE.currentPlayer = nextParticipatingIndex(STATE.currentPlayer);
-    STATE.busy = false;
-    render();
-    maybeRunCpuTurn();
   }
 
   function maybeRunCpuTurn() {
@@ -1684,7 +1752,17 @@
     }
     setTimeout(() => {
       try {
-        cpuTurn(STATE.currentPlayer);
+        const res = cpuTurn(STATE.currentPlayer);
+        if (res && typeof res.then === 'function') {
+          res.catch((e) => {
+            handleError(e);
+            STATE.phase = 'mustDraw';
+            STATE.currentPlayer = nextParticipatingIndex(STATE.currentPlayer);
+            STATE.busy = false;
+            render();
+            maybeRunCpuTurn();
+          });
+        }
       } catch (e) {
         handleError(e);
         STATE.phase = 'mustDraw';

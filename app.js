@@ -857,6 +857,67 @@
     logLine(`${STATE.players[fromIdx].name} pays ${STATE.players[toIdx].name} ${amount} (${why}).`);
   }
 
+  function settleWinner(winnerIdx, stakeMultiplier, why) {
+    if (!Number.isInteger(winnerIdx) || winnerIdx < 0 || winnerIdx >= STATE.players.length) return;
+    const winner = STATE.players[winnerIdx];
+    if (!winner || !winner.playing) return;
+
+    const mult = Number.isFinite(stakeMultiplier) && stakeMultiplier > 0 ? stakeMultiplier : 1;
+    const stake = (gameOptions.basicStake || 1) * mult;
+
+    STATE.winnerIndex = winnerIdx;
+    for (let i = 0; i < STATE.players.length; i++) {
+      if (i === winnerIdx) continue;
+      const p = STATE.players[i];
+      if (!p || !p.playing) continue;
+      applyPayment(i, winnerIdx, stake, why || 'winner');
+    }
+  }
+
+  function settleByDeadwood(why) {
+    const results = showdownScores().filter((r) => STATE.players[r.idx]?.playing);
+    if (!results.length) return { ok: false, draw: true };
+
+    let best = Infinity;
+    for (const r of results) best = Math.min(best, r.deadwood);
+    const winners = results.filter((r) => r.deadwood === best);
+    if (winners.length !== 1) {
+      logLine(`${why}: draw (tie at ${best}).`);
+      STATE.winnerIndex = null;
+      return { ok: false, draw: true };
+    }
+
+    const w = winners[0];
+    logLine(`${why}: ${w.name} wins with deadwood ${w.deadwood}.`);
+    settleWinner(w.idx, 1, why);
+    return { ok: true, winnerIdx: w.idx };
+  }
+
+  function settleDrop(byIdx) {
+    settleByDeadwood('drop');
+  }
+
+  function settleStockOut() {
+    settleByDeadwood('stockout');
+  }
+
+  function checkEmptyHandWin(pIdx, terminalCheck) {
+    try {
+      if (STATE.handOver) return true;
+      const p = STATE.players[pIdx];
+      if (!p || !p.playing) return false;
+      if (p.hand.length !== 0) return false;
+
+      logLine(`${p.name} went out (empty hand).`);
+      settleWinner(pIdx, 1, terminalCheck ? 'empty hand' : 'empty hand');
+      endHand({ kind: 'empty', by: pIdx });
+      return true;
+    } catch (e) {
+      handleError(e);
+      return false;
+    }
+  }
+
   function renderScoreboard() {
     if (!UI.scoreboard) return;
     UI.scoreboard.innerHTML = '';

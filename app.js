@@ -1258,34 +1258,31 @@
     if (!container) return;
     const maxShown = 14;
     const show = Math.min(count, maxShown);
-    const children = Array.from(container.children);
+
+    const moreExisting = container.querySelector(':scope > .moreCount');
+    if (moreExisting) moreExisting.remove();
+
+    const backs = Array.from(container.querySelectorAll(':scope > .cpuCardBack'));
 
     for (let i = 0; i < show; i++) {
-      let el = children[i];
-      if (!(el instanceof HTMLElement) || !el.classList.contains('cpuCardBack')) {
+      let el = backs[i];
+      if (!el) {
         el = document.createElement('div');
         el.className = 'cpuCardBack';
+        container.appendChild(el);
       }
       renderCardBack(el);
-      container.appendChild(el);
     }
 
-    for (let i = children.length - 1; i >= show; i--) {
-      const n = children[i];
-      if (n) n.remove();
+    for (let i = backs.length - 1; i >= show; i--) {
+      backs[i].remove();
     }
 
     if (count > maxShown) {
-      let more = container.querySelector(':scope > .moreCount');
-      if (!more) {
-        more = document.createElement('div');
-        more.className = 'moreCount';
-      }
+      const more = document.createElement('div');
+      more.className = 'moreCount';
       more.textContent = `+${count - maxShown}`;
       container.appendChild(more);
-    } else {
-      const more = container.querySelector(':scope > .moreCount');
-      if (more) more.remove();
     }
   }
 

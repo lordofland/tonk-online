@@ -633,6 +633,7 @@
     justDrewCardId: null,
     justDrewHold: false,
     sortMode: 0,
+    scores: [0, 0, 0, 0, 0],
     play: [true, true, true, true, true],
     turnTiming: {
       turnStartTs: null,
@@ -877,6 +878,15 @@
     return deck;
   }
 
+  function ensureScoresSized() {
+    if (!Array.isArray(STATE.scores)) STATE.scores = [];
+    const n = STATE.players.length;
+    if (STATE.scores.length !== n) {
+      const next = Array.from({ length: n }, (_, i) => (Number.isFinite(STATE.scores[i]) ? STATE.scores[i] : 0));
+      STATE.scores = next;
+    }
+  }
+
   function initPlayers() {
     STATE.players = [
       { name: 'Billy', isHuman: true, hand: [], melds: [], revealedMelds: [], playing: true },
@@ -885,6 +895,7 @@
       { name: 'Andy', isHuman: false, hand: [], melds: [], revealedMelds: [], playing: true },
       { name: 'Mark', isHuman: false, hand: [], melds: [], revealedMelds: [], playing: true },
     ];
+    ensureScoresSized();
   }
 
   function participatingCount() {

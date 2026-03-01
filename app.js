@@ -396,6 +396,8 @@
 
     humanHand: document.getElementById('humanHand'),
     humanMeta: document.getElementById('humanMeta'),
+    humanMetaText: document.getElementById('humanMetaText'),
+    humanTurnTime: document.getElementById('humanTurnTime'),
     humanMelds: document.getElementById('humanMelds'),
 
     seatHuman: document.getElementById('human'),
@@ -408,6 +410,18 @@
     cpu2Meta: document.getElementById('cpu2Meta'),
     cpu3Meta: document.getElementById('cpu3Meta'),
     cpu4Meta: document.getElementById('cpu4Meta'),
+
+    cpu1MetaText: document.getElementById('cpu1MetaText'),
+    cpu2MetaText: document.getElementById('cpu2MetaText'),
+    cpu3MetaText: document.getElementById('cpu3MetaText'),
+    cpu4MetaText: document.getElementById('cpu4MetaText'),
+
+    cpu1TurnTime: document.getElementById('cpu1TurnTime'),
+    cpu2TurnTime: document.getElementById('cpu2TurnTime'),
+    cpu3TurnTime: document.getElementById('cpu3TurnTime'),
+    cpu4TurnTime: document.getElementById('cpu4TurnTime'),
+
+    turnStats: document.getElementById('turnStats'),
 
     cpu1Hand: document.getElementById('cpu1Hand'),
     cpu2Hand: document.getElementById('cpu2Hand'),
@@ -497,11 +511,93 @@
     gameOptions.noKnock = !!UI.optNoKnock.checked;
     if (gameOptions.noKnock) STATE.pendingKnock = false;
     if (UI.optStake) {
+      if (UI.optStake.disabled) {
+        UI.optStake.value = String(gameOptions.basicStake);
+        render();
+        return;
+      }
       const v = Number(UI.optStake.value);
       gameOptions.basicStake = Number.isFinite(v) && v >= 1 ? Math.floor(v) : 1;
       UI.optStake.value = String(gameOptions.basicStake);
     }
     render();
+  }
+
+  function formatMs(ms) {
+    const safe = Number.isFinite(ms) && ms > 0 ? ms : 0;
+    const tenths = Math.floor(safe / 100);
+    const totalSeconds = Math.floor(tenths / 10);
+    const t = tenths % 10;
+    const s = totalSeconds % 60;
+    const m = Math.floor(totalSeconds / 60);
+    const ss = m > 0 ? String(s).padStart(2, '0') : String(s);
+    return m > 0 ? `${m}:${ss}.${t}` : `${ss}.${t}`;
+  }
+
+  function ensureTurnTimingInit() {
+    if (!STATE.turnTiming.perPlayer.length) {
+      STATE.turnTiming.perPlayer = Array.from({ length: STATE.players.length }, () => ({ totalMs: 0, turns: 0, lastTurnMs: 0 }));
+    }
+  }
+
+  function updateTurnTimerUi() {
+    if (STATE.handOver || STATE.dealing) {
+      if (STATE.turnTiming.rafId != null) {
+        cancelAnimationFrame(STATE.turnTiming.rafId);
+        STATE.turnTiming.rafId = null;
+      }
+      return;
+    }
+    if (STATE.turnTiming.turnStartTs == null) return;
+
+    const now = performance.now();
+    const currentMs = Math.max(0, now - STATE.turnTiming.turnStartTs);
+    const idx = STATE.currentPlayer;
+
+    const el = idx === 0 ? UI.humanTurnTime : idx === 1 ? UI.cpu1TurnTime : idx === 2 ? UI.cpu2TurnTime : idx === 3 ? UI.cpu3TurnTime : UI.cpu4TurnTime;
+    if (el) el.textContent = formatMs(currentMs);
+
+    if (STATE.turnTiming.rafId != null) cancelAnimationFrame(STATE.turnTiming.rafId);
+    STATE.turnTiming.rafId = requestAnimationFrame(updateTurnTimerUi);
+  }
+
+  function startTurnTimer(playerIdx) {
+    if (STATE.handOver || STATE.dealing) return;
+    if (!Number.isInteger(playerIdx) || playerIdx < 0 || playerIdx >= STATE.players.length) return;
+    if (!STATE.players[playerIdx] || !STATE.players[playerIdx].playing) return;
+
+    ensureTurnTimingInit();
+    STATE.turnTiming.turnStartTs = performance.now();
+    STATE.turnTiming.currentPlayerAtStart = playerIdx;
+
+    if (STATE.turnTiming.rafId != null) cancelAnimationFrame(STATE.turnTiming.rafId);
+    STATE.turnTiming.rafId = requestAnimationFrame(updateTurnTimerUi);
+  }
+
+  function endTurnTimer(playerIdx) {
+    if (STATE.turnTiming.turnStartTs == null) return;
+    if (STATE.turnTiming.currentPlayerAtStart == null) return;
+
+    const idx = Number.isInteger(playerIdx) ? playerIdx : STATE.turnTiming.currentPlayerAtStart;
+    const now = performance.now();
+    const ms = Math.max(0, now - STATE.turnTiming.turnStartTs);
+
+    ensureTurnTimingInit();
+    const rec = STATE.turnTiming.perPlayer[idx];
+    if (rec) {
+      rec.totalMs += ms;
+      rec.turns += 1;
+      rec.lastTurnMs = ms;
+    }
+    STATE.turnTiming.group.totalMs += ms;
+    STATE.turnTiming.group.turns += 1;
+
+    STATE.turnTiming.turnStartTs = null;
+    STATE.turnTiming.currentPlayerAtStart = null;
+    if (STATE.turnTiming.rafId != null) {
+      cancelAnimationFrame(STATE.turnTiming.rafId);
+      STATE.turnTiming.rafId = null;
+    }
   }
 
   function logLine(msg) {
@@ -537,11 +633,14 @@
     justDrewCardId: null,
     justDrewHold: false,
     sortMode: 0,
-    dealing: false,
-    scores: [0, 0, 0, 0, 0],
-    winnerIndex: null,
-
     play: [true, true, true, true, true],
+    turnTiming: {
+      turnStartTs: null,
+      currentPlayerAtStart: null,
+      perPlayer: [],
+      group: { totalMs: 0, turns: 0 },
+      rafId: null,
+    },
     drag: {
       pointerId: null,
       cardId: null,
@@ -1005,6 +1104,8 @@
     updateHandDom(UI.humanHand, STATE.players[0].hand, false);
     render();
 
+    startTurnTimer(STATE.currentPlayer);
+
     if (STATE.currentPlayer !== 0) maybeRunCpuTurn();
   }
 
@@ -1191,11 +1292,14 @@
 
     const human = STATE.players[0];
     if (!human.playing) {
-      UI.humanMeta.textContent = 'Sitting Out';
+      if (UI.humanMetaText) UI.humanMetaText.textContent = 'Sitting Out';
+      else UI.humanMeta.textContent = 'Sitting Out';
     } else {
-      UI.humanMeta.textContent = gameOptions.noKnock
+      const txt = gameOptions.noKnock
         ? `Cards: ${human.hand.length} | Deadwood (best): ${playerDeadwoodEstimate(human)}`
         : `Cards: ${human.hand.length} | Deadwood (best): ${playerDeadwoodEstimate(human)} | Knock ≤ ${CONFIG.knockThreshold}`;
+      if (UI.humanMetaText) UI.humanMetaText.textContent = txt;
+      else UI.humanMeta.textContent = txt;
     }
 
     const cpu1 = STATE.players[1];
@@ -1203,10 +1307,47 @@
     const cpu3 = STATE.players[3];
     const cpu4 = STATE.players[4];
 
-    UI.cpu1Meta.textContent = cpu1.playing ? `Cards: ${cpu1.hand.length}` : 'Sitting Out';
-    UI.cpu2Meta.textContent = cpu2.playing ? `Cards: ${cpu2.hand.length}` : 'Sitting Out';
-    UI.cpu3Meta.textContent = cpu3.playing ? `Cards: ${cpu3.hand.length}` : 'Sitting Out';
-    UI.cpu4Meta.textContent = cpu4.playing ? `Cards: ${cpu4.hand.length}` : 'Sitting Out';
+    const cpu1Txt = cpu1.playing ? `Cards: ${cpu1.hand.length}` : 'Sitting Out';
+    const cpu2Txt = cpu2.playing ? `Cards: ${cpu2.hand.length}` : 'Sitting Out';
+    const cpu3Txt = cpu3.playing ? `Cards: ${cpu3.hand.length}` : 'Sitting Out';
+    const cpu4Txt = cpu4.playing ? `Cards: ${cpu4.hand.length}` : 'Sitting Out';
+
+    if (UI.cpu1MetaText) UI.cpu1MetaText.textContent = cpu1Txt;
+    else UI.cpu1Meta.textContent = cpu1Txt;
+    if (UI.cpu2MetaText) UI.cpu2MetaText.textContent = cpu2Txt;
+    else UI.cpu2Meta.textContent = cpu2Txt;
+    if (UI.cpu3MetaText) UI.cpu3MetaText.textContent = cpu3Txt;
+    else UI.cpu3Meta.textContent = cpu3Txt;
+    if (UI.cpu4MetaText) UI.cpu4MetaText.textContent = cpu4Txt;
+    else UI.cpu4Meta.textContent = cpu4Txt;
+
+    if (STATE.turnTiming && STATE.turnTiming.perPlayer && STATE.turnTiming.perPlayer.length) {
+      const now = performance.now();
+      const activeIdx = STATE.currentPlayer;
+      const activeMs = !STATE.handOver && !STATE.dealing && STATE.turnTiming.turnStartTs != null && STATE.turnTiming.currentPlayerAtStart === activeIdx ? Math.max(0, now - STATE.turnTiming.turnStartTs) : null;
+
+      if (UI.humanTurnTime) UI.humanTurnTime.textContent = activeIdx === 0 && activeMs != null ? formatMs(activeMs) : formatMs(STATE.turnTiming.perPlayer[0]?.lastTurnMs || 0);
+      if (UI.cpu1TurnTime) UI.cpu1TurnTime.textContent = activeIdx === 1 && activeMs != null ? formatMs(activeMs) : formatMs(STATE.turnTiming.perPlayer[1]?.lastTurnMs || 0);
+      if (UI.cpu2TurnTime) UI.cpu2TurnTime.textContent = activeIdx === 2 && activeMs != null ? formatMs(activeMs) : formatMs(STATE.turnTiming.perPlayer[2]?.lastTurnMs || 0);
+      if (UI.cpu3TurnTime) UI.cpu3TurnTime.textContent = activeIdx === 3 && activeMs != null ? formatMs(activeMs) : formatMs(STATE.turnTiming.perPlayer[3]?.lastTurnMs || 0);
+      if (UI.cpu4TurnTime) UI.cpu4TurnTime.textContent = activeIdx === 4 && activeMs != null ? formatMs(activeMs) : formatMs(STATE.turnTiming.perPlayer[4]?.lastTurnMs || 0);
+
+      if (UI.turnStats) {
+        const billy = STATE.turnTiming.perPlayer[0] || { totalMs: 0, turns: 0 };
+        const billyAvg = billy.turns ? billy.totalMs / billy.turns : 0;
+        const group = STATE.turnTiming.group || { totalMs: 0, turns: 0 };
+        const groupAvg = group.turns ? group.totalMs / group.turns : 0;
+        const perLines = [];
+        for (let i = 0; i < STATE.players.length; i++) {
+          const p = STATE.players[i];
+          if (!p || !p.playing) continue;
+          const rec = STATE.turnTiming.perPlayer[i] || { totalMs: 0, turns: 0 };
+          const avg = rec.turns ? rec.totalMs / rec.turns : 0;
+          perLines.push(`${p.name} avg: ${formatMs(avg)} (${rec.turns})`);
+        }
+        UI.turnStats.textContent = `Billy total: ${formatMs(billy.totalMs)} | Billy avg: ${formatMs(billyAvg)} | Group avg: ${formatMs(groupAvg)} | ${perLines.join(' | ')}`;
+      }
+    }
 
     renderCpuHand(UI.cpu1Hand, cpu1.playing ? cpu1.hand.length : 0);
     renderCpuHand(UI.cpu2Hand, cpu2.playing ? cpu2.hand.length : 0);
@@ -1256,6 +1397,13 @@
       UI.optNoKnock.disabled = lockNoKnock;
       const label = UI.optNoKnock.closest('label');
       if (label) label.classList.toggle('isDisabled', lockNoKnock);
+    }
+
+    if (UI.optStake) {
+      const lockStake = !STATE.handOver || STATE.dealing || STATE.busy;
+      UI.optStake.disabled = lockStake;
+      const label = UI.optStake.closest('label');
+      if (label) label.classList.toggle('isDisabled', lockStake);
     }
 
     const playChecks = [UI.optPlay0, UI.optPlay1, UI.optPlay2, UI.optPlay3, UI.optPlay4];
@@ -1575,8 +1723,10 @@
         return;
       }
 
+      endTurnTimer(0);
       STATE.phase = 'mustDraw';
       STATE.currentPlayer = nextParticipatingIndex(STATE.currentPlayer);
+      startTurnTimer(STATE.currentPlayer);
       STATE.busy = false;
       render();
       maybeRunCpuTurn();
@@ -1759,7 +1909,9 @@
       if (discardIdx < 0 || discardIdx >= p.hand.length) {
         logLine(`${p.name} could not pick a discard. (AI issue)`);
         STATE.phase = 'mustDraw';
+        endTurnTimer(pIdx);
         STATE.currentPlayer = nextParticipatingIndex(STATE.currentPlayer);
+        startTurnTimer(STATE.currentPlayer);
         STATE.busy = false;
         render();
         maybeRunCpuTurn();
@@ -1786,14 +1938,18 @@
       await sleep(actionDelayMs());
 
       STATE.phase = 'mustDraw';
+      endTurnTimer(pIdx);
       STATE.currentPlayer = nextParticipatingIndex(STATE.currentPlayer);
+      startTurnTimer(STATE.currentPlayer);
       STATE.busy = false;
       render();
       maybeRunCpuTurn();
     } catch (e) {
       handleError(e);
       STATE.phase = 'mustDraw';
+      endTurnTimer(pIdx);
       STATE.currentPlayer = nextParticipatingIndex(STATE.currentPlayer);
+      startTurnTimer(STATE.currentPlayer);
       STATE.busy = false;
       render();
       maybeRunCpuTurn();
@@ -1861,6 +2017,7 @@
 
   function endHand(reason) {
     if (STATE.handOver) return;
+    endTurnTimer(STATE.currentPlayer);
     STATE.handOver = true;
     STATE.phase = 'mustDraw';
     STATE.pendingKnock = false;

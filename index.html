@@ -20,7 +20,7 @@
         <section class="player cpu seat" id="cpu2" data-seat="cpu2">
           <div class="playerHeader">
             <div class="playerName" id="cpu2Name">Curt <span class="badge" id="badgeDealer2">D</span> <span class="winnerLabel">WINNER</span> <label class="playToggle"><input type="checkbox" id="optPlay2" checked /> Playing</label></div>
-            <div class="playerMeta" id="cpu2Meta">Cards: 0</div>
+            <div class="playerMeta" id="cpu2Meta"><span id="cpu2MetaText">Cards: 0</span> <span class="turnTimer" id="cpu2TurnTime">0:00.0</span></div>
           </div>
           <div class="playerMelds" id="cpu2Melds"></div>
           <div class="cpuHand" id="cpu2Hand" aria-label="CPU 2 hand"></div>
@@ -49,7 +49,7 @@
         <section class="player cpu seat" id="cpu3" data-seat="cpu3">
           <div class="playerHeader">
             <div class="playerName" id="cpu3Name">Andy <span class="badge" id="badgeDealer3">D</span> <span class="winnerLabel">WINNER</span> <label class="playToggle"><input type="checkbox" id="optPlay3" checked /> Playing</label></div>
-            <div class="playerMeta" id="cpu3Meta">Cards: 0</div>
+            <div class="playerMeta" id="cpu3Meta"><span id="cpu3MetaText">Cards: 0</span> <span class="turnTimer" id="cpu3TurnTime">0:00.0</span></div>
           </div>
           <div class="playerMelds" id="cpu3Melds"></div>
           <div class="cpuHand" id="cpu3Hand" aria-label="CPU 3 hand"></div>
@@ -58,7 +58,7 @@
         <section class="player cpu seat" id="cpu1" data-seat="cpu1">
           <div class="playerHeader">
             <div class="playerName" id="cpu1Name">Butch <span class="badge" id="badgeDealer1">D</span> <span class="winnerLabel">WINNER</span> <label class="playToggle"><input type="checkbox" id="optPlay1" checked /> Playing</label></div>
-            <div class="playerMeta" id="cpu1Meta">Cards: 0</div>
+            <div class="playerMeta" id="cpu1Meta"><span id="cpu1MetaText">Cards: 0</span> <span class="turnTimer" id="cpu1TurnTime">0:00.0</span></div>
           </div>
           <div class="playerMelds" id="cpu1Melds"></div>
           <div class="cpuHand" id="cpu1Hand" aria-label="CPU 1 hand"></div>
@@ -73,7 +73,7 @@
                 <button class="btnSmall" id="btnSort">Sort</button>
               </div>
             </div>
-            <div class="playerMeta" id="humanMeta">Cards: 0</div>
+            <div class="playerMeta" id="humanMeta"><span id="humanMetaText">Cards: 0</span> <span class="turnTimer" id="humanTurnTime">0:00.0</span></div>
           </div>
           <div class="humanControls" id="humanControls">
             <button class="btnSmall" id="btnKnock">Drop</button>
@@ -85,7 +85,7 @@
         <section class="player cpu seat" id="cpu4" data-seat="cpu4">
           <div class="playerHeader">
             <div class="playerName" id="cpu4Name">Mark <span class="badge" id="badgeDealer4">D</span> <span class="winnerLabel">WINNER</span> <label class="playToggle"><input type="checkbox" id="optPlay4" checked /> Playing</label></div>
-            <div class="playerMeta" id="cpu4Meta">Cards: 0</div>
+            <div class="playerMeta" id="cpu4Meta"><span id="cpu4MetaText">Cards: 0</span> <span class="turnTimer" id="cpu4TurnTime">0:00.0</span></div>
           </div>
           <div class="playerMelds" id="cpu4Melds"></div>
           <div class="cpuHand" id="cpu4Hand" aria-label="CPU 4 hand"></div>
@@ -98,6 +98,7 @@
           Double-click Draw to draw. Double-click Discard to take. Double-click a card in your hand to discard.
         </div>
         <div class="status" id="statusLine">—</div>
+        <div class="turnStats" id="turnStats"></div>
         <div class="logWrap">
           <div class="logTitle">Log</div>
           <div class="log" id="log"></div>

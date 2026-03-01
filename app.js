@@ -1012,16 +1012,24 @@
     return STATE.discard.length ? STATE.discard[STATE.discard.length - 1] : null;
   }
 
-  function ensureDeckNotEmpty() {
-    if (STATE.deck.length > 0) return true;
+  function recycleDeckIfNeeded() {
+    if (STATE.deck.length > 0) return false;
     if (STATE.discard.length <= 1) return false;
+
     const top = STATE.discard.pop();
     const recycle = STATE.discard.splice(0, STATE.discard.length);
     shuffleInPlace(recycle);
     STATE.deck = recycle;
     if (top) STATE.discard.push(top);
     logLine('Deck was empty. Recycled discard pile into deck.');
+    render();
     return STATE.deck.length > 0;
+  }
+
+  function ensureDeckNotEmpty() {
+    if (STATE.deck.length > 0) return true;
+    if (recycleDeckIfNeeded()) return true;
+    return false;
   }
 
   function currentPlayer() {
@@ -1384,6 +1392,7 @@
     const c = STATE.deck.pop();
     if (!c) return null;
     p.hand.push(c);
+    recycleDeckIfNeeded();
     return c;
   }
 

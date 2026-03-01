@@ -36,6 +36,7 @@
 
   function beginHumanHandReorder(ev) {
     try {
+      if (NET.connected) return;
       if (STATE.handOver) return;
       if (STATE.busy) return;
       if (!STATE.players[0]?.playing) return;
@@ -74,6 +75,7 @@
 
   function discardHumanCardByUid(uid) {
     try {
+      if (NET.connected) return;
       if (!uid) return;
       if (STATE.handOver) return;
       if (STATE.busy) return;
@@ -387,6 +389,12 @@
 
     fxLayer: document.getElementById('fxLayer'),
 
+    humanName: document.getElementById('humanName'),
+    cpu1Name: document.getElementById('cpu1Name'),
+    cpu2Name: document.getElementById('cpu2Name'),
+    cpu3Name: document.getElementById('cpu3Name'),
+    cpu4Name: document.getElementById('cpu4Name'),
+
     drawPileCount: document.getElementById('drawPileCount'),
     discardPileCount: document.getElementById('discardPileCount'),
     discardPileCard: document.getElementById('discardPileCard'),
@@ -438,6 +446,20 @@
     btnToggleLog: document.getElementById('btnToggleLog'),
     btnSort: document.getElementById('btnSort'),
 
+    btnFold0: document.getElementById('btnFold0'),
+    btnFold1: document.getElementById('btnFold1'),
+    btnFold2: document.getElementById('btnFold2'),
+    btnFold3: document.getElementById('btnFold3'),
+    btnFold4: document.getElementById('btnFold4'),
+
+    seatModal: document.getElementById('seatModal'),
+    seatModalHint: document.getElementById('seatModalHint'),
+    seatChoiceAndy: document.getElementById('seatChoiceAndy'),
+    seatChoiceBilly: document.getElementById('seatChoiceBilly'),
+    seatChoiceButch: document.getElementById('seatChoiceButch'),
+    seatChoiceCurt: document.getElementById('seatChoiceCurt'),
+    seatChoiceMark: document.getElementById('seatChoiceMark'),
+
     optNoKnock: document.getElementById('optNoKnock'),
     optStake: document.getElementById('optStake'),
 
@@ -447,6 +469,194 @@
     optPlay3: document.getElementById('optPlay3'),
     optPlay4: document.getElementById('optPlay4'),
   };
+
+  const NET = {
+    enabled: true,
+    ws: null,
+    connected: false,
+    clientId: null,
+    seatNames: ['Billy', 'Butch', 'Curt', 'Andy', 'Mark'],
+    mySeatName: null,
+    mySeatIdx: null,
+    lastServerState: null,
+    reconnectTimer: null,
+  };
+
+  function mySeatIdx() {
+    return NET.connected && Number.isInteger(NET.mySeatIdx) ? NET.mySeatIdx : null;
+  }
+
+  function wsUrl() {
+    const proto = location.protocol === 'https:' ? 'wss' : 'ws';
+    return `${proto}://${location.host}/ws`;
+  }
+
+  function sendWs(obj) {
+    if (!NET.ws || !NET.connected) return false;
+    try {
+      NET.ws.send(JSON.stringify(obj));
+      return true;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  function multiplayerSendAction(action, payload) {
+    return sendWs({ type: 'ACTION', action, payload: payload || null });
+  }
+
+  function openSeatModal() {
+    if (!UI.seatModal) return;
+    UI.seatModal.classList.add('isOpen');
+    UI.seatModal.setAttribute('aria-hidden', 'false');
+  }
+
+  function closeSeatModal() {
+    if (!UI.seatModal) return;
+    UI.seatModal.classList.remove('isOpen');
+    UI.seatModal.setAttribute('aria-hidden', 'true');
+  }
+
+  function updateSeatModalButtonsFromServer() {
+    if (!NET.lastServerState || !Array.isArray(NET.lastServerState.seats)) return;
+    const seats = NET.lastServerState.seats;
+    const btns = [UI.seatChoiceBilly, UI.seatChoiceButch, UI.seatChoiceCurt, UI.seatChoiceAndy, UI.seatChoiceMark];
+    for (let i = 0; i < btns.length; i++) {
+      const b = btns[i];
+      if (!b) continue;
+      const seat = seats[i];
+      const taken = !!(seat && seat.claimed);
+      b.disabled = taken && NET.mySeatIdx !== i;
+    }
+  }
+
+  function requestClaimSeat(name) {
+    if (!name) return;
+    sendWs({ type: 'CLAIM_SEAT', payload: { name } });
+  }
+
+  function setNameLabel(el, name) {
+    if (!el) return;
+    // The name elements contain badges/toggles. Replace only the leading text node.
+    const first = el.firstChild;
+    if (first && first.nodeType === Node.TEXT_NODE) first.nodeValue = `${name} `;
+  }
+
+  function applyServerStateSnapshot(snapshot) {
+    if (!snapshot || !snapshot.game || !Array.isArray(snapshot.game.players)) return;
+    NET.lastServerState = snapshot;
+
+    // Server is authoritative; client is a renderer. Map snapshot into local STATE shape.
+    if (!STATE.players.length) initPlayers();
+
+    STATE.handOver = !!snapshot.game.handOver;
+    STATE.dealing = !!snapshot.game.dealing;
+    STATE.currentPlayer = snapshot.game.currentPlayer;
+    STATE.dealerIndex = snapshot.game.dealerIndex;
+    STATE.phase = snapshot.game.phase;
+
+    // We only need counts for deck/discard UI.
+    STATE.deck = Array.from({ length: snapshot.game.deckCount || 0 }, () => ({ id: 'X', rank: 0, suit: 'S' }));
+    STATE.discard = [];
+    if (snapshot.game.discardTop) STATE.discard.push(snapshot.game.discardTop);
+
+    if (Array.isArray(snapshot.game.scores)) STATE.scores = snapshot.game.scores.slice();
+
+    for (let i = 0; i < STATE.players.length; i++) {
+      const sp = snapshot.game.players[i];
+      const lp = STATE.players[i];
+      if (!lp || !sp) continue;
+      lp.name = sp.name;
+      lp.melds = Array.isArray(sp.melds) ? sp.melds : [];
+      lp.playing = snapshot.seats && snapshot.seats[i] ? snapshot.seats[i].mode !== 'sittingOut' : lp.playing;
+
+      lp.handCount = Number.isFinite(sp.handCount) ? sp.handCount : (Array.isArray(sp.hand) ? sp.hand.length : 0);
+      if (i === NET.mySeatIdx && Array.isArray(sp.hand)) lp.hand = sp.hand;
+      else lp.hand = [];
+    }
+
+    if (snapshot.game.turnTiming) {
+      STATE.turnTiming.perPlayer = snapshot.game.turnTiming.perPlayer || STATE.turnTiming.perPlayer;
+      STATE.turnTiming.group = snapshot.game.turnTiming.group || STATE.turnTiming.group;
+      STATE.turnTiming.turnStartTs = null;
+      STATE.turnTiming.currentPlayerAtStart = STATE.currentPlayer;
+    }
+
+    // Update visible name labels to match server.
+    setNameLabel(UI.humanName, STATE.players[0]?.name || '');
+    setNameLabel(UI.cpu1Name, STATE.players[1]?.name || '');
+    setNameLabel(UI.cpu2Name, STATE.players[2]?.name || '');
+    setNameLabel(UI.cpu3Name, STATE.players[3]?.name || '');
+    setNameLabel(UI.cpu4Name, STATE.players[4]?.name || '');
+
+    updateSeatModalButtonsFromServer();
+    render();
+  }
+
+  function connectMultiplayer() {
+    if (!NET.enabled) return;
+    if (NET.ws && (NET.ws.readyState === WebSocket.OPEN || NET.ws.readyState === WebSocket.CONNECTING)) return;
+
+    try {
+      NET.ws = new WebSocket(wsUrl());
+    } catch (_) {
+      return;
+    }
+
+    NET.ws.addEventListener('open', () => {
+      NET.connected = true;
+      sendWs({ type: 'HELLO', payload: {} });
+
+      const saved = localStorage.getItem('tonkSeatName');
+      if (saved) requestClaimSeat(saved);
+      else openSeatModal();
+    });
+
+    NET.ws.addEventListener('message', (ev) => {
+      let msg = null;
+      try {
+        msg = JSON.parse(ev.data);
+      } catch (_) {
+        return;
+      }
+      if (!msg || typeof msg !== 'object') return;
+
+      if (msg.type === 'WELCOME') {
+        NET.clientId = msg.payload && msg.payload.clientId;
+        if (Array.isArray(msg.payload && msg.payload.seatNames)) NET.seatNames = msg.payload.seatNames;
+        return;
+      }
+
+      if (msg.type === 'CLAIM_OK') {
+        NET.mySeatIdx = msg.payload && msg.payload.seatIdx;
+        NET.mySeatName = msg.payload && msg.payload.name;
+        if (NET.mySeatName) localStorage.setItem('tonkSeatName', NET.mySeatName);
+        closeSeatModal();
+        render();
+        return;
+      }
+
+      if (msg.type === 'CLAIM_DENIED') {
+        openSeatModal();
+        if (UI.seatModalHint) UI.seatModalHint.textContent = 'Seat is unavailable. Choose another.';
+        return;
+      }
+
+      if (msg.type === 'STATE') {
+        applyServerStateSnapshot(msg.payload);
+        return;
+      }
+    });
+
+    const scheduleReconnect = () => {
+      NET.connected = false;
+      if (NET.reconnectTimer) clearTimeout(NET.reconnectTimer);
+      NET.reconnectTimer = setTimeout(() => connectMultiplayer(), 1000);
+    };
+
+    NET.ws.addEventListener('close', scheduleReconnect);
+    NET.ws.addEventListener('error', scheduleReconnect);
+  }
 
   function updateSortModeLabel() {}
 
@@ -960,6 +1170,19 @@
     return UI.seatCpu4;
   }
 
+  function canLocalUserActNow() {
+    const mi = mySeatIdx();
+    if (mi == null) return false;
+    if (STATE.handOver || STATE.busy || STATE.dealing) return false;
+    const seat = NET.lastServerState && Array.isArray(NET.lastServerState.seats) ? NET.lastServerState.seats[mi] : null;
+    if (!seat) return false;
+    if (seat.mode === 'sittingOut') return false;
+    if (seat.folded) return false;
+    const p = STATE.players[mi];
+    if (!p) return false;
+    return STATE.currentPlayer === mi;
+  }
+
   function handPoints(cards) {
     return cards.reduce((acc, c) => acc + cardValue(c.rank), 0);
   }
@@ -1294,11 +1517,13 @@
 
     renderCardBack(UI.drawPileCard);
 
-    const canHumanInteract = !STATE.handOver && !STATE.busy && STATE.currentPlayer === 0 && !!STATE.players[0]?.playing;
-    UI.drawPile.classList.toggle('dbl', canHumanInteract && STATE.phase === 'mustDraw');
-    UI.discardPile.classList.toggle('dbl', canHumanInteract && STATE.phase === 'mustDraw' && !!td);
+    const canInteract = NET.connected ? canLocalUserActNow() : (!STATE.handOver && !STATE.busy && STATE.currentPlayer === 0 && !!STATE.players[0]?.playing);
+    UI.drawPile.classList.toggle('dbl', canInteract && STATE.phase === 'mustDraw');
+    UI.discardPile.classList.toggle('dbl', canInteract && STATE.phase === 'mustDraw' && !!td);
 
     UI.turnIndicator.textContent = `Turn: ${currentPlayer().name}`;
+
+    if (UI.btnResetGame) UI.btnResetGame.style.display = NET.connected ? '' : 'none';
 
     renderScoreboard();
 
@@ -1310,14 +1535,19 @@
       seat.classList.toggle('isWinner', Number.isInteger(STATE.winnerIndex) && i === STATE.winnerIndex);
     }
 
+    const mi2 = mySeatIdx();
     const human = STATE.players[0];
     if (!human.playing) {
       if (UI.humanMetaText) UI.humanMetaText.textContent = 'Sitting Out';
       else UI.humanMeta.textContent = 'Sitting Out';
     } else {
-      const txt = gameOptions.noKnock
-        ? `Cards: ${human.hand.length} | Deadwood (best): ${playerDeadwoodEstimate(human)}`
-        : `Cards: ${human.hand.length} | Deadwood (best): ${playerDeadwoodEstimate(human)} | Knock ≤ ${CONFIG.knockThreshold}`;
+      const isMine = NET.connected && mi2 === 0;
+      const cardsN = NET.connected ? (isMine ? (human.hand ? human.hand.length : 0) : (Number.isFinite(human.handCount) ? human.handCount : 0)) : human.hand.length;
+      const txt = isMine
+        ? (gameOptions.noKnock
+            ? `Cards: ${cardsN} | Deadwood (best): ${playerDeadwoodEstimate(human)}`
+            : `Cards: ${cardsN} | Deadwood (best): ${playerDeadwoodEstimate(human)} | Knock ≤ ${CONFIG.knockThreshold}`)
+        : `Cards: ${cardsN}`;
       if (UI.humanMetaText) UI.humanMetaText.textContent = txt;
       else UI.humanMeta.textContent = txt;
     }
@@ -1327,10 +1557,15 @@
     const cpu3 = STATE.players[3];
     const cpu4 = STATE.players[4];
 
-    const cpu1Txt = cpu1.playing ? `Cards: ${cpu1.hand.length}` : 'Sitting Out';
-    const cpu2Txt = cpu2.playing ? `Cards: ${cpu2.hand.length}` : 'Sitting Out';
-    const cpu3Txt = cpu3.playing ? `Cards: ${cpu3.hand.length}` : 'Sitting Out';
-    const cpu4Txt = cpu4.playing ? `Cards: ${cpu4.hand.length}` : 'Sitting Out';
+    const cpu1Cards = NET.connected ? (mi2 === 1 ? (cpu1.hand ? cpu1.hand.length : 0) : (Number.isFinite(cpu1.handCount) ? cpu1.handCount : 0)) : cpu1.hand.length;
+    const cpu2Cards = NET.connected ? (mi2 === 2 ? (cpu2.hand ? cpu2.hand.length : 0) : (Number.isFinite(cpu2.handCount) ? cpu2.handCount : 0)) : cpu2.hand.length;
+    const cpu3Cards = NET.connected ? (mi2 === 3 ? (cpu3.hand ? cpu3.hand.length : 0) : (Number.isFinite(cpu3.handCount) ? cpu3.handCount : 0)) : cpu3.hand.length;
+    const cpu4Cards = NET.connected ? (mi2 === 4 ? (cpu4.hand ? cpu4.hand.length : 0) : (Number.isFinite(cpu4.handCount) ? cpu4.handCount : 0)) : cpu4.hand.length;
+
+    const cpu1Txt = cpu1.playing ? `Cards: ${cpu1Cards}` : 'Sitting Out';
+    const cpu2Txt = cpu2.playing ? `Cards: ${cpu2Cards}` : 'Sitting Out';
+    const cpu3Txt = cpu3.playing ? `Cards: ${cpu3Cards}` : 'Sitting Out';
+    const cpu4Txt = cpu4.playing ? `Cards: ${cpu4Cards}` : 'Sitting Out';
 
     if (UI.cpu1MetaText) UI.cpu1MetaText.textContent = cpu1Txt;
     else UI.cpu1Meta.textContent = cpu1Txt;
@@ -1369,15 +1604,31 @@
       }
     }
 
-    renderCpuHand(UI.cpu1Hand, cpu1.playing ? cpu1.hand.length : 0);
-    renderCpuHand(UI.cpu2Hand, cpu2.playing ? cpu2.hand.length : 0);
-    renderCpuHand(UI.cpu3Hand, cpu3.playing ? cpu3.hand.length : 0);
-    renderCpuHand(UI.cpu4Hand, cpu4.playing ? cpu4.hand.length : 0);
+    // Multiplayer: render your claimed seat hand face-up in that seat's container; others as backs/count.
+    const mi = mySeatIdx();
+    if (NET.connected && mi != null) {
+      const myHandEl = getHandElByPlayerIndex(mi);
+      if (myHandEl) updateHandDom(myHandEl, STATE.players[mi]?.hand || [], false);
 
-    if (!human.playing) {
-      updateHandDom(UI.humanHand, [], false);
+      for (let i = 0; i < STATE.players.length; i++) {
+        if (i === mi) continue;
+        const p = STATE.players[i];
+        const el = getHandElByPlayerIndex(i);
+        if (!el) continue;
+        if (i === 0) updateHandDom(el, [], false);
+        else updateCpuHandDom(el, p && p.playing ? (Number.isFinite(p.handCount) ? p.handCount : 0) : 0);
+      }
     } else {
-      updateHandDom(UI.humanHand, human.hand, !!STATE.dealing);
+      renderCpuHand(UI.cpu1Hand, cpu1.playing ? cpu1.hand.length : 0);
+      renderCpuHand(UI.cpu2Hand, cpu2.playing ? cpu2.hand.length : 0);
+      renderCpuHand(UI.cpu3Hand, cpu3.playing ? cpu3.hand.length : 0);
+      renderCpuHand(UI.cpu4Hand, cpu4.playing ? cpu4.hand.length : 0);
+
+      if (!human.playing) {
+        updateHandDom(UI.humanHand, [], false);
+      } else {
+        updateHandDom(UI.humanHand, human.hand, !!STATE.dealing);
+      }
     }
 
     renderMelds(UI.humanMelds, human.playing ? human.melds : []);
@@ -1394,14 +1645,15 @@
     const isHumanTurn = p.isHuman && STATE.currentPlayer === 0;
     const canAct = !STATE.handOver;
 
-    const humanPlaying = !!STATE.players[0]?.playing;
-    const enabled = canAct && isHumanTurn && !STATE.busy && humanPlaying;
+    const mi = mySeatIdx();
+    const enabled = NET.connected ? canLocalUserActNow() : (canAct && isHumanTurn && !STATE.busy && !!STATE.players[0]?.playing);
+    const humanPlaying = NET.connected ? (mi != null && !!STATE.players[mi]) : !!STATE.players[0]?.playing;
 
     if (UI.btnSort) UI.btnSort.disabled = STATE.handOver || STATE.busy || !humanPlaying;
 
     const enoughPlayers = participatingCount() >= 2;
     UI.btnNewHand.disabled = !STATE.handOver || STATE.busy || STATE.dealing || !enoughPlayers;
-    UI.btnCreateMeld.disabled = !(enabled && STATE.phase === 'mustDiscard' && selectedCount() >= 1);
+    UI.btnCreateMeld.disabled = NET.connected ? true : !(enabled && STATE.phase === 'mustDiscard' && selectedCount() >= 1);
 
     if (gameOptions.noKnock) {
       UI.btnKnock.style.display = 'none';
@@ -1409,7 +1661,16 @@
     } else {
       UI.btnKnock.style.display = '';
       const dropAllowed = enabled && STATE.phase === 'mustDraw';
-      UI.btnKnock.disabled = !dropAllowed;
+      UI.btnKnock.disabled = NET.connected ? true : !dropAllowed;
+    }
+
+    if (NET.connected && UI.btnSort) UI.btnSort.disabled = true;
+
+    const foldBtns = [UI.btnFold0, UI.btnFold1, UI.btnFold2, UI.btnFold3, UI.btnFold4];
+    for (let i = 0; i < foldBtns.length; i++) {
+      const b = foldBtns[i];
+      if (!b) continue;
+      b.disabled = NET.connected ? NET.mySeatIdx !== i : false;
     }
 
     if (UI.optNoKnock) {
@@ -1430,7 +1691,7 @@
     for (const el of playChecks) {
       if (!el) continue;
       const lock = !STATE.handOver || STATE.dealing;
-      el.disabled = lock;
+      el.disabled = lock || NET.connected;
       const label = el.closest('label');
       if (label) label.classList.toggle('isDisabled', lock);
     }
@@ -2074,6 +2335,10 @@
   function startNewHand() {
     (async () => {
       try {
+        if (NET.connected) {
+          multiplayerSendAction('NEW_HAND');
+          return;
+        }
         if (!STATE.handOver && (STATE.deck.length || STATE.discard.length)) return;
         if (!STATE.players.length) initPlayers();
         syncParticipationFromUi();
@@ -2209,18 +2474,104 @@
     UI.drawPile.addEventListener('dblclick', (ev) => {
       ev.preventDefault();
       ev.stopPropagation();
-      if (!STATE.players[0]?.playing) return;
-      humanDrawFrom('deck');
+      if (NET.connected) {
+        const mi = mySeatIdx();
+        if (mi == null) return;
+        if (!canLocalUserActNow()) return;
+        if (STATE.phase !== 'mustDraw') return;
+        multiplayerSendAction('DRAW_DECK');
+      } else {
+        if (!STATE.players[0]?.playing) return;
+        humanDrawFrom('deck');
+      }
     });
   }
   if (UI.discardPile) {
     UI.discardPile.addEventListener('dblclick', (ev) => {
       ev.preventDefault();
       ev.stopPropagation();
-      if (!STATE.players[0]?.playing) return;
-      humanDrawFrom('discard');
+      if (NET.connected) {
+        const mi = mySeatIdx();
+        if (mi == null) return;
+        if (!canLocalUserActNow()) return;
+        if (STATE.phase !== 'mustDraw') return;
+        multiplayerSendAction('DRAW_DISCARD');
+      } else {
+        if (!STATE.players[0]?.playing) return;
+        humanDrawFrom('discard');
+      }
     });
   }
+
+  document.addEventListener('dblclick', (ev) => {
+    try {
+      if (!(ev.target instanceof HTMLElement)) return;
+      const cardEl = ev.target.closest('.handCard');
+      if (!cardEl) return;
+      const uid = cardEl.dataset.uid || cardEl.dataset.cardId;
+      if (!uid) return;
+
+      if (!NET.connected) return;
+      const mi = mySeatIdx();
+      if (mi == null) return;
+      if (!canLocalUserActNow()) return;
+      if (STATE.phase !== 'mustDiscard') return;
+
+      const myHandEl = getHandElByPlayerIndex(mi);
+      if (!myHandEl || !myHandEl.contains(cardEl)) return;
+
+      multiplayerSendAction('DISCARD', { cardId: uid });
+    } catch (e) {
+      handleError(e);
+    }
+  });
+
+  const foldBtns = [UI.btnFold0, UI.btnFold1, UI.btnFold2, UI.btnFold3, UI.btnFold4];
+  for (let i = 0; i < foldBtns.length; i++) {
+    const b = foldBtns[i];
+    if (!b) continue;
+    b.addEventListener('click', () => {
+      if (NET.connected) {
+        // Only your claimed seat can fold.
+        if (NET.mySeatIdx !== i) return;
+        multiplayerSendAction('FOLD');
+      } else {
+        // Local fallback: mark sitting out.
+        if (STATE.players[i]) STATE.players[i].playing = false;
+        render();
+      }
+    });
+  }
+
+  const seatChoices = [UI.seatChoiceAndy, UI.seatChoiceBilly, UI.seatChoiceButch, UI.seatChoiceCurt, UI.seatChoiceMark];
+  for (const b of seatChoices) {
+    if (!b) continue;
+    b.addEventListener('click', () => {
+      const name = b.getAttribute('data-seat-name');
+      requestClaimSeat(name);
+    });
+  }
+
+  (function ensureResetButton() {
+    try {
+      const parent = document.getElementById('centerControls');
+      if (!parent) return;
+      if (document.getElementById('btnResetGame')) return;
+      const btn = document.createElement('button');
+      btn.id = 'btnResetGame';
+      btn.textContent = 'Reset Game';
+      btn.style.display = 'none';
+      btn.addEventListener('click', () => {
+        if (!NET.connected) return;
+        multiplayerSendAction('RESET_ROOM');
+      });
+      parent.appendChild(btn);
+
+      UI.btnResetGame = btn;
+    } catch (e) {
+      handleError(e);
+    }
+  })();
 
   if (!STATE.players.length) initPlayers();
   logLine('App loaded');
@@ -2307,5 +2658,6 @@
 
   STATE.handOver = true;
   applyUiVisibility();
+  connectMultiplayer();
   render();
 })();

@@ -21,6 +21,7 @@
           <div class="playerHeader">
             <div class="playerName" id="cpu2Name">Curt <span class="badge" id="badgeDealer2">D</span> <span class="winnerLabel">WINNER</span> <label class="playToggle"><input type="checkbox" id="optPlay2" checked /> Playing</label></div>
             <div class="playerMeta" id="cpu2Meta"><span id="cpu2MetaText">Cards: 0</span> <span class="turnTimer" id="cpu2TurnTime">0:00.0</span></div>
+            <div class="seatControls"><button class="btnSmall" id="btnFold2">Fold</button></div>
           </div>
           <div class="playerMelds" id="cpu2Melds"></div>
           <div class="cpuHand" id="cpu2Hand" aria-label="CPU 2 hand"></div>
@@ -51,6 +52,7 @@
           <div class="playerHeader">
             <div class="playerName" id="cpu3Name">Andy <span class="badge" id="badgeDealer3">D</span> <span class="winnerLabel">WINNER</span> <label class="playToggle"><input type="checkbox" id="optPlay3" checked /> Playing</label></div>
             <div class="playerMeta" id="cpu3Meta"><span id="cpu3MetaText">Cards: 0</span> <span class="turnTimer" id="cpu3TurnTime">0:00.0</span></div>
+            <div class="seatControls"><button class="btnSmall" id="btnFold3">Fold</button></div>
           </div>
           <div class="playerMelds" id="cpu3Melds"></div>
           <div class="cpuHand" id="cpu3Hand" aria-label="CPU 3 hand"></div>
@@ -60,6 +62,7 @@
           <div class="playerHeader">
             <div class="playerName" id="cpu1Name">Butch <span class="badge" id="badgeDealer1">D</span> <span class="winnerLabel">WINNER</span> <label class="playToggle"><input type="checkbox" id="optPlay1" checked /> Playing</label></div>
             <div class="playerMeta" id="cpu1Meta"><span id="cpu1MetaText">Cards: 0</span> <span class="turnTimer" id="cpu1TurnTime">0:00.0</span></div>
+            <div class="seatControls"><button class="btnSmall" id="btnFold1">Fold</button></div>
           </div>
           <div class="playerMelds" id="cpu1Melds"></div>
           <div class="cpuHand" id="cpu1Hand" aria-label="CPU 1 hand"></div>
@@ -75,6 +78,7 @@
               </div>
             </div>
             <div class="playerMeta" id="humanMeta"><span id="humanMetaText">Cards: 0</span> <span class="turnTimer" id="humanTurnTime">0:00.0</span></div>
+            <div class="seatControls"><button class="btnSmall" id="btnFold0">Fold</button></div>
           </div>
           <div class="humanControls" id="humanControls">
             <button class="btnSmall" id="btnKnock">Drop</button>
@@ -87,6 +91,7 @@
           <div class="playerHeader">
             <div class="playerName" id="cpu4Name">Mark <span class="badge" id="badgeDealer4">D</span> <span class="winnerLabel">WINNER</span> <label class="playToggle"><input type="checkbox" id="optPlay4" checked /> Playing</label></div>
             <div class="playerMeta" id="cpu4Meta"><span id="cpu4MetaText">Cards: 0</span> <span class="turnTimer" id="cpu4TurnTime">0:00.0</span></div>
+            <div class="seatControls"><button class="btnSmall" id="btnFold4">Fold</button></div>
           </div>
           <div class="playerMelds" id="cpu4Melds"></div>
           <div class="cpuHand" id="cpu4Hand" aria-label="CPU 4 hand"></div>
@@ -107,6 +112,20 @@
       </section>
 
       <div id="fxLayer" aria-hidden="true"></div>
+
+      <div class="modalOverlay" id="seatModal" aria-hidden="true">
+        <div class="modalCard" role="dialog" aria-modal="true" aria-labelledby="seatModalTitle">
+          <div class="modalTitle" id="seatModalTitle">Who are you?</div>
+          <div class="modalBody" id="seatModalBody">
+            <button class="seatChoice" data-seat-name="Andy" id="seatChoiceAndy">Andy</button>
+            <button class="seatChoice" data-seat-name="Billy" id="seatChoiceBilly">Billy</button>
+            <button class="seatChoice" data-seat-name="Butch" id="seatChoiceButch">Butch</button>
+            <button class="seatChoice" data-seat-name="Curt" id="seatChoiceCurt">Curt</button>
+            <button class="seatChoice" data-seat-name="Mark" id="seatChoiceMark">Mark</button>
+          </div>
+          <div class="modalHint" id="seatModalHint">Choose an available seat.</div>
+        </div>
+      </div>
     </div>
 
     <script src="app.js"></script>

@@ -385,6 +385,8 @@
     statusLine: document.getElementById('statusLine'),
     log: document.getElementById('log'),
 
+    whoAmI: document.getElementById('whoAmI'),
+
     scoreboard: document.getElementById('scoreboard'),
 
     fxLayer: document.getElementById('fxLayer'),
@@ -535,6 +537,47 @@
     sendWs({ type: 'CLAIM_SEAT', payload: { name } });
   }
 
+  function seatStatusTextFromServer(seat) {
+    if (!seat) return '';
+    if (seat.mode === 'sittingOut') return 'Sitting Out';
+    if (seat.pendingJoin) return 'Waiting (joins next hand)';
+    if (seat.mode === 'cpu') return 'CPU';
+    return 'Playing';
+  }
+
+  function updateModeControlsFromServer() {
+    if (!NET.connected) return;
+    if (!NET.lastServerState || !Array.isArray(NET.lastServerState.seats)) return;
+    const checks = [UI.optPlay0, UI.optPlay1, UI.optPlay2, UI.optPlay3, UI.optPlay4];
+    for (let i = 0; i < checks.length; i++) {
+      const el = checks[i];
+      if (!el) continue;
+      const seat = NET.lastServerState.seats[i];
+      const mode = seat && seat.mode;
+      if (mode === 'sittingOut') {
+        el.checked = false;
+        el.indeterminate = false;
+      } else if (mode === 'cpu') {
+        el.checked = true;
+        el.indeterminate = true;
+      } else {
+        el.checked = true;
+        el.indeterminate = false;
+      }
+    }
+  }
+
+  function cycleMySeatModeAndSend() {
+    if (!NET.connected) return;
+    if (!Number.isInteger(NET.mySeatIdx)) return;
+    if (!NET.mySeatName) return;
+
+    const seat = NET.lastServerState && Array.isArray(NET.lastServerState.seats) ? NET.lastServerState.seats[NET.mySeatIdx] : null;
+    const cur = seat && seat.mode ? seat.mode : 'human';
+    const next = cur === 'human' ? 'cpu' : cur === 'cpu' ? 'sittingOut' : 'human';
+    sendWs({ type: 'SET_MODE', payload: { name: NET.mySeatName, mode: next } });
+  }
+
   function setNameLabel(el, name) {
     if (!el) return;
     // The name elements contain badges/toggles. Replace only the leading text node.
@@ -545,6 +588,8 @@
   function applyServerStateSnapshot(snapshot) {
     if (!snapshot || !snapshot.game || !Array.isArray(snapshot.game.players)) return;
     NET.lastServerState = snapshot;
+
+    if (UI.whoAmI) UI.whoAmI.textContent = NET.mySeatName ? `You are: ${NET.mySeatName}` : 'Not seated';
 
     // Server is authoritative; client is a renderer. Map snapshot into local STATE shape.
     if (!STATE.players.length) initPlayers();
@@ -590,6 +635,7 @@
     setNameLabel(UI.cpu4Name, STATE.players[4]?.name || '');
 
     updateSeatModalButtonsFromServer();
+    updateModeControlsFromServer();
     render();
   }
 
@@ -632,6 +678,7 @@
         NET.mySeatName = msg.payload && msg.payload.name;
         if (NET.mySeatName) localStorage.setItem('tonkSeatName', NET.mySeatName);
         closeSeatModal();
+        if (UI.whoAmI) UI.whoAmI.textContent = NET.mySeatName ? `You are: ${NET.mySeatName}` : 'Not seated';
         render();
         return;
       }
@@ -1117,21 +1164,14 @@
     ensureScoresSized();
   }
 
-  function participatingCount() {
-    return STATE.players.reduce((acc, p) => acc + (p && p.playing ? 1 : 0), 0);
-  }
-
   function syncParticipationFromUi() {
+    if (NET.connected) return;
     const checks = [UI.optPlay0, UI.optPlay1, UI.optPlay2, UI.optPlay3, UI.optPlay4];
     for (let i = 0; i < STATE.players.length; i++) {
       const p = STATE.players[i];
       if (!p) continue;
-      const el = checks[i];
-      if (!el) continue;
-      p.playing = !!el.checked;
-      STATE.play[i] = p.playing;
+      p.playing = !!checks[i]?.checked;
     }
-    render();
   }
 
   function resetHandState() {
@@ -1536,21 +1576,23 @@
     }
 
     const mi2 = mySeatIdx();
+    const seatsSnap = NET.connected && NET.lastServerState && Array.isArray(NET.lastServerState.seats) ? NET.lastServerState.seats : null;
+
     const human = STATE.players[0];
-    if (!human.playing) {
-      if (UI.humanMetaText) UI.humanMetaText.textContent = 'Sitting Out';
-      else UI.humanMeta.textContent = 'Sitting Out';
-    } else {
-      const isMine = NET.connected && mi2 === 0;
-      const cardsN = NET.connected ? (isMine ? (human.hand ? human.hand.length : 0) : (Number.isFinite(human.handCount) ? human.handCount : 0)) : human.hand.length;
-      const txt = isMine
-        ? (gameOptions.noKnock
-            ? `Cards: ${cardsN} | Deadwood (best): ${playerDeadwoodEstimate(human)}`
-            : `Cards: ${cardsN} | Deadwood (best): ${playerDeadwoodEstimate(human)} | Knock ≤ ${CONFIG.knockThreshold}`)
-        : `Cards: ${cardsN}`;
-      if (UI.humanMetaText) UI.humanMetaText.textContent = txt;
-      else UI.humanMeta.textContent = txt;
-    }
+    const humanStatus = NET.connected ? seatStatusTextFromServer(seatsSnap && seatsSnap[0]) : (human.playing ? '' : 'Sitting Out');
+    const humanIsMine = NET.connected && mi2 === 0;
+    const humanCardsN = NET.connected
+      ? (humanIsMine ? (human.hand ? human.hand.length : 0) : (Number.isFinite(human.handCount) ? human.handCount : 0))
+      : human.hand.length;
+    const humanTxt = NET.connected
+      ? `${humanStatus} | Cards: ${humanCardsN}`
+      : (!human.playing
+          ? 'Sitting Out'
+          : (gameOptions.noKnock
+              ? `Cards: ${humanCardsN} | Deadwood (best): ${playerDeadwoodEstimate(human)}`
+              : `Cards: ${humanCardsN} | Deadwood (best): ${playerDeadwoodEstimate(human)} | Knock ≤ ${CONFIG.knockThreshold}`));
+    if (UI.humanMetaText) UI.humanMetaText.textContent = humanTxt;
+    else UI.humanMeta.textContent = humanTxt;
 
     const cpu1 = STATE.players[1];
     const cpu2 = STATE.players[2];
@@ -1562,10 +1604,15 @@
     const cpu3Cards = NET.connected ? (mi2 === 3 ? (cpu3.hand ? cpu3.hand.length : 0) : (Number.isFinite(cpu3.handCount) ? cpu3.handCount : 0)) : cpu3.hand.length;
     const cpu4Cards = NET.connected ? (mi2 === 4 ? (cpu4.hand ? cpu4.hand.length : 0) : (Number.isFinite(cpu4.handCount) ? cpu4.handCount : 0)) : cpu4.hand.length;
 
-    const cpu1Txt = cpu1.playing ? `Cards: ${cpu1Cards}` : 'Sitting Out';
-    const cpu2Txt = cpu2.playing ? `Cards: ${cpu2Cards}` : 'Sitting Out';
-    const cpu3Txt = cpu3.playing ? `Cards: ${cpu3Cards}` : 'Sitting Out';
-    const cpu4Txt = cpu4.playing ? `Cards: ${cpu4Cards}` : 'Sitting Out';
+    const cpu1Status = NET.connected ? seatStatusTextFromServer(seatsSnap && seatsSnap[1]) : (cpu1.playing ? '' : 'Sitting Out');
+    const cpu2Status = NET.connected ? seatStatusTextFromServer(seatsSnap && seatsSnap[2]) : (cpu2.playing ? '' : 'Sitting Out');
+    const cpu3Status = NET.connected ? seatStatusTextFromServer(seatsSnap && seatsSnap[3]) : (cpu3.playing ? '' : 'Sitting Out');
+    const cpu4Status = NET.connected ? seatStatusTextFromServer(seatsSnap && seatsSnap[4]) : (cpu4.playing ? '' : 'Sitting Out');
+
+    const cpu1Txt = NET.connected ? `${cpu1Status} | Cards: ${cpu1Cards}` : (cpu1.playing ? `Cards: ${cpu1Cards}` : 'Sitting Out');
+    const cpu2Txt = NET.connected ? `${cpu2Status} | Cards: ${cpu2Cards}` : (cpu2.playing ? `Cards: ${cpu2Cards}` : 'Sitting Out');
+    const cpu3Txt = NET.connected ? `${cpu3Status} | Cards: ${cpu3Cards}` : (cpu3.playing ? `Cards: ${cpu3Cards}` : 'Sitting Out');
+    const cpu4Txt = NET.connected ? `${cpu4Status} | Cards: ${cpu4Cards}` : (cpu4.playing ? `Cards: ${cpu4Cards}` : 'Sitting Out');
 
     if (UI.cpu1MetaText) UI.cpu1MetaText.textContent = cpu1Txt;
     else UI.cpu1Meta.textContent = cpu1Txt;
@@ -1691,7 +1738,11 @@
     for (const el of playChecks) {
       if (!el) continue;
       const lock = !STATE.handOver || STATE.dealing;
-      el.disabled = lock || NET.connected;
+      if (NET.connected) {
+        el.disabled = lock || !Number.isInteger(NET.mySeatIdx) || playChecks[NET.mySeatIdx] !== el;
+      } else {
+        el.disabled = lock;
+      }
       const label = el.closest('label');
       if (label) label.classList.toggle('isDisabled', lock);
     }
@@ -2549,6 +2600,34 @@
     b.addEventListener('click', () => {
       const name = b.getAttribute('data-seat-name');
       requestClaimSeat(name);
+    });
+  }
+
+  const playChecks = [UI.optPlay0, UI.optPlay1, UI.optPlay2, UI.optPlay3, UI.optPlay4];
+  for (let i = 0; i < playChecks.length; i++) {
+    const el = playChecks[i];
+    if (!el) continue;
+
+    el.addEventListener('click', (ev) => {
+      try {
+        if (NET.connected) {
+          ev.preventDefault();
+          if (NET.mySeatIdx !== i) {
+            updateModeControlsFromServer();
+            return;
+          }
+          cycleMySeatModeAndSend();
+          return;
+        }
+
+        // Local fallback.
+        setTimeout(() => {
+          syncParticipationFromUi();
+          render();
+        }, 0);
+      } catch (e) {
+        handleError(e);
+      }
     });
   }
 

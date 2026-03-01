@@ -361,6 +361,12 @@ body {
   flex-wrap: wrap;
 }
 
+.whoAmI {
+  font-size: 14px;
+  opacity: 0.85;
+  margin: 6px 0 10px;
+}
+
  .seatControls {
    margin-left: auto;
  }

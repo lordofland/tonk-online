@@ -439,10 +439,21 @@ wss.on('connection', (ws) => {
       const seat = room.seats[seatIdx];
       if (!seat) return;
       if (!['human', 'cpu', 'sittingOut'].includes(mode)) return;
-      // Allow changing mode only if seat unclaimed or claimed by requester.
-      if (seat.claimedBy && seat.claimedBy !== id) return;
+      // Only seat owner may change mode.
+      if (seat.claimedBy !== id) return;
+
       seat.mode = mode;
-      if (mode === 'sittingOut') seat.folded = false;
+      if (mode === 'sittingOut') {
+        seat.folded = true;
+        seat.pendingJoin = false;
+      } else {
+        if (isHandActive()) {
+          seat.pendingJoin = true;
+        } else {
+          seat.pendingJoin = false;
+          seat.folded = false;
+        }
+      }
       broadcastState();
       return;
     }

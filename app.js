@@ -435,6 +435,7 @@
     btnCreateMeld: document.getElementById('btnCreateMeld'),
     btnKnock: document.getElementById('btnKnock'),
     btnNewHand: document.getElementById('btnNewHand'),
+    btnToggleLog: document.getElementById('btnToggleLog'),
     btnSort: document.getElementById('btnSort'),
 
     optNoKnock: document.getElementById('optNoKnock'),
@@ -660,7 +661,15 @@
       suppressClick: false,
     },
     lastError: null,
+    ui: {
+      showLog: false,
+    },
   };
+
+  function applyUiVisibility() {
+    document.body.classList.toggle('showLog', !!STATE.ui.showLog);
+    if (UI.btnToggleLog) UI.btnToggleLog.textContent = STATE.ui.showLog ? 'Hide Log' : 'Show Log';
+  }
 
   function sleep(ms) {
     return new Promise((resolve) => setTimeout(resolve, ms));
@@ -2187,6 +2196,12 @@
 
   // --- Initialization / event wiring ---
   if (UI.btnNewHand) UI.btnNewHand.addEventListener('click', startNewHand);
+  if (UI.btnToggleLog) {
+    UI.btnToggleLog.addEventListener('click', () => {
+      STATE.ui.showLog = !STATE.ui.showLog;
+      applyUiVisibility();
+    });
+  }
   if (UI.btnCreateMeld) UI.btnCreateMeld.addEventListener('click', humanCreateMeld);
   if (UI.btnKnock) UI.btnKnock.addEventListener('click', humanKnock);
   if (UI.btnSort) UI.btnSort.addEventListener('click', toggleSort);
@@ -2291,5 +2306,6 @@
   });
 
   STATE.handOver = true;
+  applyUiVisibility();
   render();
 })();

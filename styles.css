@@ -580,6 +580,19 @@ button:disabled {
   gap: 10px;
 }
 
+ #helpText,
+ #statusLine {
+   display: none;
+ }
+
+ .logWrap {
+   display: none;
+ }
+
+ .showLog .logWrap {
+   display: block;
+ }
+
  .turnTimer {
    font-size: 12px;
    opacity: 0.9;

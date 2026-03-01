@@ -286,6 +286,43 @@
     return true;
   }
 
+  function maybeRunLocalAiTurn() {
+    try {
+      if (!NET.connected) return;
+      const seat = mySeatInfo();
+      if (!seat || seat.mode !== 'cpu') return;
+      if (!canLocalUserActNow()) return;
+      if (STATE.handOver || STATE.dealing || STATE.busy) return;
+
+      if (STATE.phase === 'mustDraw') {
+        setTimeout(() => {
+          if (!NET.connected) return;
+          if (!canLocalUserActNow()) return;
+          if (STATE.phase !== 'mustDraw') return;
+          multiplayerSendAction('DRAW_DECK');
+        }, 650);
+        return;
+      }
+
+      if (STATE.phase === 'mustDiscard') {
+        const mi = mySeatIdx();
+        const p = mi != null ? STATE.players[mi] : null;
+        const hand = p && Array.isArray(p.hand) ? p.hand : [];
+        if (!hand.length) return;
+        const pick = hand[Math.floor(Math.random() * hand.length)];
+        if (!pick || !pick.id) return;
+        setTimeout(() => {
+          if (!NET.connected) return;
+          if (!canLocalUserActNow()) return;
+          if (STATE.phase !== 'mustDiscard') return;
+          multiplayerSendAction('DISCARD', { cardId: pick.id });
+        }, 650);
+      }
+    } catch (e) {
+      handleError(e);
+    }
+  }
+
   function isValidRunAceAware(cards) {
     if (cards.length < 3) return { ok: false, aceHigh: false };
     const s = cards[0].suit;
@@ -507,6 +544,14 @@
     return sendWs({ type: 'ACTION', action, payload: payload || null });
   }
 
+  function mySeatInfo() {
+    if (!NET.connected) return null;
+    if (!Number.isInteger(NET.mySeatIdx)) return null;
+    const seats = NET.lastServerState && Array.isArray(NET.lastServerState.seats) ? NET.lastServerState.seats : null;
+    const seat = seats ? seats[NET.mySeatIdx] : null;
+    return seat || null;
+  }
+
   function openSeatModal() {
     if (!UI.seatModal) return;
     UI.seatModal.classList.add('isOpen');
@@ -535,6 +580,57 @@
   function requestClaimSeat(name) {
     if (!name) return;
     sendWs({ type: 'CLAIM_SEAT', payload: { name } });
+  }
+
+  function ensureSeatHeaderControls(seatIdx) {
+    const seatEl = seatElByPlayerIndex(seatIdx);
+    if (!seatEl) return null;
+    const header = seatEl.querySelector('.playerHeader');
+    if (!header) return null;
+    let wrap = header.querySelector(':scope > .headerControls');
+    if (!wrap) {
+      wrap = document.createElement('div');
+      wrap.className = 'headerControls';
+      header.insertBefore(wrap, header.firstChild);
+    }
+    return wrap;
+  }
+
+  function ensureLocalSeatControlsMounted() {
+    if (!NET.connected) return;
+    const mi = mySeatIdx();
+    if (mi == null) return;
+    const seat = mySeatInfo();
+    if (!seat || seat.mode !== 'human') return;
+    const wrap = ensureSeatHeaderControls(mi);
+    if (!wrap) return;
+
+    if (UI.btnCreateMeld && UI.btnCreateMeld.parentElement !== wrap) wrap.appendChild(UI.btnCreateMeld);
+    if (UI.btnSort && UI.btnSort.parentElement !== wrap) wrap.appendChild(UI.btnSort);
+    if (UI.btnKnock && UI.btnKnock.parentElement !== wrap) wrap.appendChild(UI.btnKnock);
+  }
+
+  function ensureLocalModeSelect() {
+    if (!UI.whoAmI) return;
+    if (!document.getElementById('whoAmIText')) {
+      const t = document.createElement('span');
+      t.id = 'whoAmIText';
+      UI.whoAmI.appendChild(t);
+    }
+    if (document.getElementById('localModeSelect')) return;
+    const select = document.createElement('select');
+    select.id = 'localModeSelect';
+    select.style.marginLeft = '10px';
+    select.innerHTML = '<option value="sittingOut">Sit Out</option><option value="human">Play (Human)</option><option value="cpu">AI Plays</option>';
+    select.addEventListener('change', () => {
+      if (!NET.connected) return;
+      if (!NET.mySeatName) return;
+      const v = select.value;
+      const mode = v === 'cpu' ? 'cpu' : v === 'human' ? 'human' : 'sittingOut';
+      sendWs({ type: 'SET_MODE', payload: { name: NET.mySeatName, mode } });
+    });
+    UI.whoAmI.appendChild(select);
+    UI.localModeSelect = select;
   }
 
   function seatStatusTextFromServer(seat) {
@@ -589,7 +685,9 @@
     if (!snapshot || !snapshot.game || !Array.isArray(snapshot.game.players)) return;
     NET.lastServerState = snapshot;
 
-    if (UI.whoAmI) UI.whoAmI.textContent = NET.mySeatName ? `You are: ${NET.mySeatName}` : 'Not seated';
+    ensureLocalModeSelect();
+    const whoText = document.getElementById('whoAmIText');
+    if (whoText) whoText.textContent = NET.mySeatName ? `You are: ${NET.mySeatName}` : 'Not seated';
 
     // Server is authoritative; client is a renderer. Map snapshot into local STATE shape.
     if (!STATE.players.length) initPlayers();
@@ -636,7 +734,12 @@
 
     updateSeatModalButtonsFromServer();
     updateModeControlsFromServer();
+    if (UI.localModeSelect && NET.connected && Number.isInteger(NET.mySeatIdx) && snapshot.seats && snapshot.seats[NET.mySeatIdx]) {
+      const m = snapshot.seats[NET.mySeatIdx].mode;
+      UI.localModeSelect.value = m === 'cpu' ? 'cpu' : m === 'human' ? 'human' : 'sittingOut';
+    }
     render();
+    maybeRunLocalAiTurn();
   }
 
   function connectMultiplayer() {
@@ -678,7 +781,9 @@
         NET.mySeatName = msg.payload && msg.payload.name;
         if (NET.mySeatName) localStorage.setItem('tonkSeatName', NET.mySeatName);
         closeSeatModal();
-        if (UI.whoAmI) UI.whoAmI.textContent = NET.mySeatName ? `You are: ${NET.mySeatName}` : 'Not seated';
+        ensureLocalModeSelect();
+        const whoText = document.getElementById('whoAmIText');
+        if (whoText) whoText.textContent = NET.mySeatName ? `You are: ${NET.mySeatName}` : 'Not seated';
         render();
         return;
       }
@@ -1223,6 +1328,26 @@
     return STATE.currentPlayer === mi;
   }
 
+  function canLocalUserSelectCards() {
+    if (!NET.connected) return true;
+    const seat = mySeatInfo();
+    if (!seat) return false;
+    if (seat.mode !== 'human') return false;
+    if (seat.folded) return false;
+    if (seat.pendingJoin) return false;
+    if (STATE.handOver || STATE.dealing || STATE.busy) return false;
+    return true;
+  }
+
+  function sortMyHandClientSide() {
+    const mi = mySeatIdx();
+    if (mi == null) return;
+    const p = STATE.players[mi];
+    if (!p || !Array.isArray(p.hand)) return;
+    p.hand = sortedByRankThenSuit(p.hand);
+    render();
+  }
+
   function handPoints(cards) {
     return cards.reduce((acc, c) => acc + cardValue(c.rank), 0);
   }
@@ -1563,6 +1688,8 @@
 
     UI.turnIndicator.textContent = `Turn: ${currentPlayer().name}`;
 
+    if (NET.connected) ensureLocalSeatControlsMounted();
+
     if (UI.btnResetGame) UI.btnResetGame.style.display = NET.connected ? '' : 'none';
 
     renderScoreboard();
@@ -1662,8 +1789,11 @@
         const p = STATE.players[i];
         const el = getHandElByPlayerIndex(i);
         if (!el) continue;
-        if (i === 0) updateHandDom(el, [], false);
-        else updateCpuHandDom(el, p && p.playing ? (Number.isFinite(p.handCount) ? p.handCount : 0) : 0);
+        const want = p && p.playing ? (Number.isFinite(p.handCount) ? p.handCount : 0) : 0;
+        // Safe rebuild path: ensure opponent panels show backs with correct count.
+        const mismatch = Array.from(el.children).filter((x) => x.classList && x.classList.contains('cpuCardBack')).length !== Math.min(want, 14);
+        if (mismatch) el.innerHTML = '';
+        updateCpuHandDom(el, want);
       }
     } else {
       renderCpuHand(UI.cpu1Hand, cpu1.playing ? cpu1.hand.length : 0);
@@ -1700,18 +1830,33 @@
 
     const enoughPlayers = participatingCount() >= 2;
     UI.btnNewHand.disabled = !STATE.handOver || STATE.busy || STATE.dealing || !enoughPlayers;
-    UI.btnCreateMeld.disabled = NET.connected ? true : !(enabled && STATE.phase === 'mustDiscard' && selectedCount() >= 1);
+    if (NET.connected) {
+      const seat = mySeatInfo();
+      const canMeld = !!seat && seat.mode === 'human' && enabled && STATE.phase === 'mustDiscard' && selectedCount() >= 3;
+      UI.btnCreateMeld.disabled = !canMeld;
+    } else {
+      UI.btnCreateMeld.disabled = !(enabled && STATE.phase === 'mustDiscard' && selectedCount() >= 1);
+    }
 
     if (gameOptions.noKnock) {
       UI.btnKnock.style.display = 'none';
       UI.btnKnock.disabled = true;
     } else {
-      UI.btnKnock.style.display = '';
-      const dropAllowed = enabled && STATE.phase === 'mustDraw';
-      UI.btnKnock.disabled = NET.connected ? true : !dropAllowed;
+      if (NET.connected) {
+        const seat = mySeatInfo();
+        UI.btnKnock.style.display = seat && seat.mode === 'human' ? '' : 'none';
+        UI.btnKnock.disabled = true;
+      } else {
+        UI.btnKnock.style.display = '';
+        const dropAllowed = enabled && STATE.phase === 'mustDraw';
+        UI.btnKnock.disabled = !dropAllowed;
+      }
     }
 
-    if (NET.connected && UI.btnSort) UI.btnSort.disabled = true;
+    if (NET.connected && UI.btnSort) {
+      const seat = mySeatInfo();
+      UI.btnSort.disabled = !(seat && seat.mode === 'human');
+    }
 
     const foldBtns = [UI.btnFold0, UI.btnFold1, UI.btnFold2, UI.btnFold3, UI.btnFold4];
     for (let i = 0; i < foldBtns.length; i++) {
@@ -1751,6 +1896,18 @@
     let msg = '';
     if (STATE.handOver) {
       msg = enough ? 'Hand over. Click “New Hand” to deal again.' : 'Select at least 2 players.';
+    } else if (NET.connected) {
+      const seat = mySeatInfo();
+      const myName = seat ? seat.name : '';
+      if (!seat) msg = 'Choose a seat to play.';
+      else if (seat.mode === 'sittingOut') msg = 'You are sitting out.';
+      else if (seat.pendingJoin) msg = 'Waiting (joins next hand).';
+      else if (seat.mode === 'cpu') msg = 'AI is playing your seat.';
+      else if (!canLocalUserActNow()) msg = `${p.name} is thinking...`;
+      else if (STATE.busy) msg = 'Resolving action...';
+      else if (STATE.phase === 'mustDraw') msg = 'Your turn: double-click Draw or Discard.';
+      else if (STATE.phase === 'mustDiscard') msg = 'Click cards to select; double-click a card to discard; Meld to lay down.';
+      else msg = myName ? `You are: ${myName}` : '';
     } else if (!isHumanTurn) {
       msg = `${p.name} is thinking...`;
     } else if (STATE.busy) {
@@ -1842,6 +1999,20 @@
   function toggleSelected(cardId) {
     if (STATE.selected.has(cardId)) STATE.selected.delete(cardId);
     else STATE.selected.add(cardId);
+    render();
+  }
+
+  function multiplayerMeldFromSelection() {
+    const mi = mySeatIdx();
+    if (mi == null) return;
+    if (!canLocalUserActNow()) return;
+    if (STATE.phase !== 'mustDiscard') return;
+    const seat = mySeatInfo();
+    if (!seat || seat.mode !== 'human') return;
+    const ids = Array.from(STATE.selected);
+    if (ids.length < 3) return;
+    multiplayerSendAction('MELD', { cardIds: ids });
+    STATE.selected.clear();
     render();
   }
 
@@ -2518,9 +2689,19 @@
       applyUiVisibility();
     });
   }
-  if (UI.btnCreateMeld) UI.btnCreateMeld.addEventListener('click', humanCreateMeld);
+  if (UI.btnCreateMeld) {
+    UI.btnCreateMeld.addEventListener('click', () => {
+      if (NET.connected) multiplayerMeldFromSelection();
+      else humanCreateMeld();
+    });
+  }
   if (UI.btnKnock) UI.btnKnock.addEventListener('click', humanKnock);
-  if (UI.btnSort) UI.btnSort.addEventListener('click', toggleSort);
+  if (UI.btnSort) {
+    UI.btnSort.addEventListener('click', () => {
+      if (NET.connected) sortMyHandClientSide();
+      else toggleSort();
+    });
+  }
   if (UI.drawPile) {
     UI.drawPile.addEventListener('dblclick', (ev) => {
       ev.preventDefault();
@@ -2572,6 +2753,27 @@
       if (!myHandEl || !myHandEl.contains(cardEl)) return;
 
       multiplayerSendAction('DISCARD', { cardId: uid });
+    } catch (e) {
+      handleError(e);
+    }
+  });
+
+  document.addEventListener('click', (ev) => {
+    try {
+      if (!NET.connected) return;
+      if (!(ev.target instanceof HTMLElement)) return;
+      const cardEl = ev.target.closest('.handCard');
+      if (!cardEl) return;
+      const uid = cardEl.dataset.uid || cardEl.dataset.cardId;
+      if (!uid) return;
+
+      const mi = mySeatIdx();
+      if (mi == null) return;
+      const myHandEl = getHandElByPlayerIndex(mi);
+      if (!myHandEl || !myHandEl.contains(cardEl)) return;
+      if (!canLocalUserSelectCards()) return;
+
+      toggleSelected(uid);
     } catch (e) {
       handleError(e);
     }

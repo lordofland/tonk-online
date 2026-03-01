@@ -65,6 +65,61 @@ function shuffleInPlace(arr) {
 
 const SUITS = ['S', 'H', 'D', 'C'];
 const RANKS = ['A', '2', '3', '4', '5', '6', '7', '8', '9', '10', 'J', 'Q', 'K'];
+const RANK_TO_NUM = { A: 1, J: 11, Q: 12, K: 13 };
+function rankNum(r) {
+  if (r == null) return null;
+  if (typeof r === 'number') return r;
+  if (RANK_TO_NUM[r]) return RANK_TO_NUM[r];
+  const n = Number(r);
+  return Number.isFinite(n) ? n : null;
+}
+
+function sortedByRankThenSuit(cards) {
+  return [...cards].sort((a, b) => (rankNum(a.rank) - rankNum(b.rank)) || String(a.suit).localeCompare(String(b.suit)));
+}
+
+function isValidSet(cards) {
+  if (cards.length < 3) return false;
+  const r0 = cards[0] && cards[0].rank;
+  if (!r0) return false;
+  for (const c of cards) {
+    if (!c || c.rank !== r0) return false;
+  }
+  return true;
+}
+
+function isValidRun(cards) {
+  if (cards.length < 3) return { ok: false };
+  const suit = cards[0] && cards[0].suit;
+  if (!suit) return { ok: false };
+  for (const c of cards) {
+    if (!c || c.suit !== suit) return { ok: false };
+  }
+  const nums = cards.map((c) => rankNum(c.rank)).filter((n) => Number.isFinite(n));
+  if (nums.length !== cards.length) return { ok: false };
+  nums.sort((a, b) => a - b);
+
+  const hasAce = nums.includes(1);
+  const trySeq = (arr) => {
+    for (let i = 1; i < arr.length; i++) if (arr[i] !== arr[i - 1] + 1) return false;
+    return true;
+  };
+
+  if (trySeq(nums)) return { ok: true, aceHigh: false };
+  if (hasAce) {
+    const hi = nums.map((n) => (n === 1 ? 14 : n)).sort((a, b) => a - b);
+    if (trySeq(hi)) return { ok: true, aceHigh: true };
+  }
+  return { ok: false };
+}
+
+function validateMeld(cards) {
+  const sorted = sortedByRankThenSuit(cards);
+  if (isValidSet(sorted)) return { ok: true, type: 'set' };
+  const run = isValidRun(sorted);
+  if (run.ok) return { ok: true, type: 'run', aceHigh: !!run.aceHigh };
+  return { ok: false };
+}
 function makeDeck() {
   const deck = [];
   let id = 1;
@@ -392,6 +447,36 @@ function handleAction(client, msg) {
     endTurnTimer(client.seatIdx);
     room.game.currentPlayer = nextParticipatingIndex(room.game.currentPlayer);
     startTurnTimer(room.game.currentPlayer);
+    broadcastState();
+    return;
+  }
+
+  if (action === 'MELD') {
+    if (room.game.phase !== 'mustDiscard') return send(client.ws, { type: 'ERROR', error: 'bad_phase' });
+    const cardIds = payload && Array.isArray(payload.cardIds) ? payload.cardIds : [];
+    if (cardIds.length < 3) return send(client.ws, { type: 'ERROR', error: 'need_3_cards' });
+    const unique = Array.from(new Set(cardIds));
+    if (unique.length !== cardIds.length) return send(client.ws, { type: 'ERROR', error: 'dup_cards' });
+
+    const cards = [];
+    for (const id of cardIds) {
+      const c = p.hand.find((x) => x.id === id);
+      if (!c) return send(client.ws, { type: 'ERROR', error: 'card_not_in_hand' });
+      cards.push(c);
+    }
+
+    const val = validateMeld(cards);
+    if (!val.ok) return send(client.ws, { type: 'ERROR', error: 'invalid_meld' });
+
+    const meldCards = [];
+    for (const id of cardIds) {
+      const idx = p.hand.findIndex((x) => x.id === id);
+      if (idx >= 0) meldCards.push(p.hand.splice(idx, 1)[0]);
+    }
+    const meld = { type: val.type, cards: sortedByRankThenSuit(meldCards) };
+    if (val.type === 'run') meld.aceHigh = !!val.aceHigh;
+    p.melds = Array.isArray(p.melds) ? p.melds : [];
+    p.melds.push(meld);
     broadcastState();
     return;
   }

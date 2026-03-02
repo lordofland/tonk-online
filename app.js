@@ -777,6 +777,12 @@
         return;
       }
 
+      if (msg.type === 'ERROR') {
+        const e = msg.error || (msg.payload && msg.payload.error) || 'error';
+        logLine(`Server: ${e}`);
+        return;
+      }
+
       if (msg.type === 'CLAIM_OK') {
         NET.mySeatIdx = msg.payload && msg.payload.seatIdx;
         NET.mySeatName = msg.payload && msg.payload.name;
@@ -1558,6 +1564,23 @@
       if (STATE.players[j] && STATE.players[j].playing) return j;
     }
     return idx;
+  }
+
+  function participatingCount() {
+    if (NET.connected && NET.lastServerState && Array.isArray(NET.lastServerState.seats)) {
+      let n = 0;
+      for (const s of NET.lastServerState.seats) {
+        if (!s) continue;
+        if (s.mode === 'sittingOut') continue;
+        if (s.pendingJoin) continue;
+        if (s.folded) continue;
+        n++;
+      }
+      return n;
+    }
+    let n = 0;
+    for (const p of STATE.players) if (p && p.playing) n++;
+    return n;
   }
 
   function handValueSimple(cards) {
@@ -2804,7 +2827,6 @@
       if (!meldEl) return;
       const seat = mySeatInfo();
       if (!seat || seat.mode !== 'human') return;
-      if (!canLocalUserActNow()) return;
 
       const os = Number(meldEl.dataset.ownerSeatIdx);
       const mi = Number(meldEl.dataset.meldIndex);

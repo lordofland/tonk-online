@@ -120,6 +120,49 @@ function validateMeld(cards) {
   if (run.ok) return { ok: true, type: 'run', aceHigh: !!run.aceHigh };
   return { ok: false };
 }
+
+function runRankValue(rank, aceHigh) {
+  const n = rankNum(rank);
+  if (!Number.isFinite(n)) return null;
+  if (aceHigh && n === 1) return 14;
+  return n;
+}
+
+function layoffIntoRun(meld, card) {
+  if (!meld || !Array.isArray(meld.cards) || meld.cards.length < 3) return { ok: false, error: 'bad_meld' };
+  if (!card) return { ok: false, error: 'bad_card' };
+  const aceHigh = !!meld.aceHigh;
+  const suit = meld.cards[0] && meld.cards[0].suit;
+  if (!suit) return { ok: false, error: 'bad_meld' };
+  if (card.suit !== suit) return { ok: false, error: 'suit_mismatch' };
+  if (meld.cards.some((c) => c && c.id === card.id)) return { ok: false, error: 'dup_card' };
+
+  const vals = meld.cards.map((c) => runRankValue(c.rank, aceHigh));
+  if (vals.some((v) => !Number.isFinite(v))) return { ok: false, error: 'bad_meld' };
+  const min = Math.min(...vals);
+  const max = Math.max(...vals);
+  const cv = runRankValue(card.rank, aceHigh);
+  if (!Number.isFinite(cv)) return { ok: false, error: 'bad_card' };
+  if (cv !== min - 1 && cv !== max + 1) return { ok: false, error: 'not_end_extension' };
+
+  meld.cards.push(card);
+  meld.cards.sort((a, b) => runRankValue(a.rank, aceHigh) - runRankValue(b.rank, aceHigh));
+  return { ok: true };
+}
+
+function layoffIntoSet(meld, card) {
+  if (!meld || !Array.isArray(meld.cards) || meld.cards.length < 3) return { ok: false, error: 'bad_meld' };
+  if (!card) return { ok: false, error: 'bad_card' };
+  const r0 = meld.cards[0] && meld.cards[0].rank;
+  if (!r0) return { ok: false, error: 'bad_meld' };
+  if (card.rank !== r0) return { ok: false, error: 'rank_mismatch' };
+  if (meld.cards.some((c) => c && c.id === card.id)) return { ok: false, error: 'dup_card' };
+  if (meld.cards.length >= 4) return { ok: false, error: 'set_full' };
+
+  meld.cards.push(card);
+  meld.cards = sortedByRankThenSuit(meld.cards);
+  return { ok: true };
+}
 function makeDeck() {
   const deck = [];
   let id = 1;
@@ -505,6 +548,43 @@ function handleAction(client, msg) {
     if (val.type === 'run') meld.aceHigh = !!val.aceHigh;
     p.melds = Array.isArray(p.melds) ? p.melds : [];
     p.melds.push(meld);
+
+    if (maybeEndHandByEmptyHand(client.seatIdx)) {
+      broadcastState();
+      return;
+    }
+
+    broadcastState();
+    return;
+  }
+
+  if (action === 'LAYOFF') {
+    if (room.game.phase !== 'mustDiscard') return send(client.ws, { type: 'ERROR', error: 'bad_phase' });
+    const cardId = payload && payload.cardId;
+    const targetSeatIdx = payload && payload.targetSeatIdx;
+    const meldIndex = payload && payload.meldIndex;
+    if (!cardId) return send(client.ws, { type: 'ERROR', error: 'bad_card' });
+    if (!Number.isInteger(targetSeatIdx)) return send(client.ws, { type: 'ERROR', error: 'bad_target' });
+    if (!Number.isInteger(meldIndex) || meldIndex < 0) return send(client.ws, { type: 'ERROR', error: 'bad_target' });
+
+    const tPlayer = room.game.players[targetSeatIdx];
+    if (!tPlayer || !Array.isArray(tPlayer.melds)) return send(client.ws, { type: 'ERROR', error: 'bad_target' });
+    const meld = tPlayer.melds[meldIndex];
+    if (!meld || !Array.isArray(meld.cards)) return send(client.ws, { type: 'ERROR', error: 'bad_target' });
+
+    const idx = p.hand.findIndex((c) => c.id === cardId);
+    if (idx < 0) return send(client.ws, { type: 'ERROR', error: 'card_not_in_hand' });
+    const [removed] = p.hand.splice(idx, 1);
+
+    let res = { ok: false, error: 'invalid_layoff' };
+    if (meld.type === 'run') res = layoffIntoRun(meld, removed);
+    else if (meld.type === 'set') res = layoffIntoSet(meld, removed);
+    else res = { ok: false, error: 'unknown_meld_type' };
+
+    if (!res.ok) {
+      p.hand.push(removed);
+      return send(client.ws, { type: 'ERROR', error: res.error || 'invalid_layoff' });
+    }
 
     if (maybeEndHandByEmptyHand(client.seatIdx)) {
       broadcastState();

@@ -155,6 +155,11 @@ body {
   max-width: 100%;
 }
 
+.meld.meldTargetSelected {
+  border-color: rgba(138, 180, 248, 0.9);
+  box-shadow: 0 0 0 2px rgba(138, 180, 248, 0.25);
+}
+
 .meldHeader {
   display: flex;
   align-items: baseline;

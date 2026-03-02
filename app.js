@@ -991,6 +991,7 @@
     currentPlayer: 0,
     phase: 'mustDraw',
     selected: new Set(),
+    selectedMeldTarget: null, // { ownerSeatIdx, meldIndex }
     pendingKnock: false,
     handOver: false,
     busy: false,
@@ -1638,12 +1639,17 @@
     }
   }
 
-  function renderMelds(container, melds) {
+  function renderMelds(container, melds, ownerSeatIdx) {
     container.innerHTML = '';
     for (let i = 0; i < melds.length; i++) {
       const meld = melds[i];
       const wrap = document.createElement('div');
       wrap.className = 'meld';
+      if (Number.isInteger(ownerSeatIdx)) wrap.dataset.ownerSeatIdx = String(ownerSeatIdx);
+      wrap.dataset.meldIndex = String(i);
+      if (STATE.selectedMeldTarget && STATE.selectedMeldTarget.ownerSeatIdx === ownerSeatIdx && STATE.selectedMeldTarget.meldIndex === i) {
+        wrap.classList.add('meldTargetSelected');
+      }
       const header = document.createElement('div');
       header.className = 'meldHeader';
       const left = document.createElement('div');
@@ -1809,11 +1815,11 @@
       }
     }
 
-    renderMelds(UI.humanMelds, human.playing ? human.melds : []);
-    renderMelds(UI.cpu1Melds, cpu1.playing ? (cpu1.melds || []) : []);
-    renderMelds(UI.cpu2Melds, cpu2.playing ? (cpu2.melds || []) : []);
-    renderMelds(UI.cpu3Melds, cpu3.playing ? (cpu3.melds || []) : []);
-    renderMelds(UI.cpu4Melds, cpu4.playing ? (cpu4.melds || []) : []);
+    renderMelds(UI.humanMelds, human.playing ? human.melds : [], 0);
+    renderMelds(UI.cpu1Melds, cpu1.playing ? (cpu1.melds || []) : [], 1);
+    renderMelds(UI.cpu2Melds, cpu2.playing ? (cpu2.melds || []) : [], 2);
+    renderMelds(UI.cpu3Melds, cpu3.playing ? (cpu3.melds || []) : [], 3);
+    renderMelds(UI.cpu4Melds, cpu4.playing ? (cpu4.melds || []) : [], 4);
 
     updateButtons();
   }
@@ -1833,7 +1839,9 @@
     UI.btnNewHand.disabled = !STATE.handOver || STATE.busy || STATE.dealing || !enoughPlayers;
     if (NET.connected) {
       const seat = mySeatInfo();
-      const canMeld = !!seat && seat.mode === 'human' && enabled && STATE.phase === 'mustDiscard' && selectedCount() >= 3;
+      const hasTarget = !!(STATE.selectedMeldTarget && Number.isInteger(STATE.selectedMeldTarget.ownerSeatIdx) && Number.isInteger(STATE.selectedMeldTarget.meldIndex));
+      const sc = selectedCount();
+      const canMeld = !!seat && seat.mode === 'human' && enabled && STATE.phase === 'mustDiscard' && (sc >= 3 || (sc === 1 && hasTarget));
       UI.btnCreateMeld.disabled = !canMeld;
     } else {
       UI.btnCreateMeld.disabled = !(enabled && STATE.phase === 'mustDiscard' && selectedCount() >= 1);
@@ -2011,8 +2019,16 @@
     const seat = mySeatInfo();
     if (!seat || seat.mode !== 'human') return;
     const ids = Array.from(STATE.selected);
-    if (ids.length < 3) return;
-    multiplayerSendAction('MELD', { cardIds: ids });
+    if (ids.length === 1 && STATE.selectedMeldTarget && Number.isInteger(STATE.selectedMeldTarget.ownerSeatIdx) && Number.isInteger(STATE.selectedMeldTarget.meldIndex)) {
+      multiplayerSendAction('LAYOFF', {
+        cardId: ids[0],
+        targetSeatIdx: STATE.selectedMeldTarget.ownerSeatIdx,
+        meldIndex: STATE.selectedMeldTarget.meldIndex,
+      });
+    } else {
+      if (ids.length < 3) return;
+      multiplayerSendAction('MELD', { cardIds: ids });
+    }
     STATE.selected.clear();
     render();
   }
@@ -2775,6 +2791,29 @@
       if (!canLocalUserSelectCards()) return;
 
       toggleSelected(uid);
+    } catch (e) {
+      handleError(e);
+    }
+  });
+
+  document.addEventListener('click', (ev) => {
+    try {
+      if (!NET.connected) return;
+      if (!(ev.target instanceof HTMLElement)) return;
+      const meldEl = ev.target.closest('.meld');
+      if (!meldEl) return;
+      const seat = mySeatInfo();
+      if (!seat || seat.mode !== 'human') return;
+      if (!canLocalUserActNow()) return;
+
+      const os = Number(meldEl.dataset.ownerSeatIdx);
+      const mi = Number(meldEl.dataset.meldIndex);
+      if (!Number.isInteger(os) || !Number.isInteger(mi)) return;
+
+      const cur = STATE.selectedMeldTarget;
+      if (cur && cur.ownerSeatIdx === os && cur.meldIndex === mi) STATE.selectedMeldTarget = null;
+      else STATE.selectedMeldTarget = { ownerSeatIdx: os, meldIndex: mi };
+      render();
     } catch (e) {
       handleError(e);
     }

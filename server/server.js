@@ -149,6 +149,7 @@ function initialRoomState() {
     game: {
       handId: 0,
       handOver: true,
+      winnerIndex: null,
       dealing: false,
       dealerIndex: 0,
       currentPlayer: 0,
@@ -240,12 +241,32 @@ function resetHandState() {
   room.game.phase = 'mustDraw';
   room.game.dealing = false;
   room.game.handOver = false;
+  room.game.winnerIndex = null;
   room.game.players = SEAT_NAMES.map((name) => ({ name, hand: [], melds: [] }));
   for (const seat of room.seats) seat.folded = false;
   room.game.turnTiming.turnStartServerTs = null;
   room.game.turnTiming.perPlayer = Array.from({ length: SEAT_NAMES.length }, () => ({ totalMs: 0, turns: 0, lastTurnMs: 0 }));
   room.game.turnTiming.group = { totalMs: 0, turns: 0 };
   ensureScoresSized();
+}
+
+function maybeEndHandByEmptyHand(seatIdx) {
+  if (!Number.isInteger(seatIdx)) return false;
+  if (!isHandActive()) return false;
+  if (!activeInHandSeat(seatIdx)) return false;
+  const p = room.game.players[seatIdx];
+  if (!p || !Array.isArray(p.hand)) return false;
+  if (p.hand.length !== 0) return false;
+
+  endTurnTimer(seatIdx);
+  room.game.handOver = true;
+  room.game.winnerIndex = seatIdx;
+  room.game.phase = 'mustDraw';
+  room.game.dealerIndex = (room.game.dealerIndex + 1) % room.seats.length;
+  room.game.currentPlayer = room.game.dealerIndex;
+  room.game.turnTiming.turnStartServerTs = null;
+  applyPendingJoinsIfAllowed();
+  return true;
 }
 
 function dealNewHand() {
@@ -305,6 +326,7 @@ function redactStateForSeat(seatIdx) {
     game: {
       handId: g.handId,
       handOver: g.handOver,
+      winnerIndex: Number.isInteger(g.winnerIndex) ? g.winnerIndex : null,
       dealing: g.dealing,
       dealerIndex: g.dealerIndex,
       currentPlayer: g.currentPlayer,
@@ -443,6 +465,12 @@ function handleAction(client, msg) {
     if (idx < 0) return send(client.ws, { type: 'ERROR', error: 'card_not_in_hand' });
     const [removed] = p.hand.splice(idx, 1);
     room.game.discard.push(removed);
+
+    if (maybeEndHandByEmptyHand(client.seatIdx)) {
+      broadcastState();
+      return;
+    }
+
     room.game.phase = 'mustDraw';
     endTurnTimer(client.seatIdx);
     room.game.currentPlayer = nextParticipatingIndex(room.game.currentPlayer);
@@ -477,6 +505,12 @@ function handleAction(client, msg) {
     if (val.type === 'run') meld.aceHigh = !!val.aceHigh;
     p.melds = Array.isArray(p.melds) ? p.melds : [];
     p.melds.push(meld);
+
+    if (maybeEndHandByEmptyHand(client.seatIdx)) {
+      broadcastState();
+      return;
+    }
+
     broadcastState();
     return;
   }

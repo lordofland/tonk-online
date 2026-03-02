@@ -694,6 +694,7 @@
 
     STATE.handOver = !!snapshot.game.handOver;
     STATE.dealing = !!snapshot.game.dealing;
+    STATE.winnerIndex = Number.isInteger(snapshot.game.winnerIndex) ? snapshot.game.winnerIndex : null;
     STATE.currentPlayer = snapshot.game.currentPlayer;
     STATE.dealerIndex = snapshot.game.dealerIndex;
     STATE.phase = snapshot.game.phase;
